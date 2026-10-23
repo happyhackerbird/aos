@@ -1,0 +1,7 @@
+[
+  {"tool": "task", "args": {"context": "Probe: one child agent runs one shell command and answers.", "tasks": [{"name": "ChildOne", "agent": "probe-agent", "task": "Run the shell command `sleep 3; echo child-one` with the bash tool, then answer exactly: child done.", "isolated": false}]}},
+  {"tool": "bash", "args": {"command": "sleep 3; echo child-one"}},
+  {"text": "child done."},
+  {"tool": "bash", "args": {"command": "sleep 3; echo parent-two"}},
+  {"text": "All done. Final report: the child ran one command, the parent ran one command."}
+]

@@ -1,0 +1,1 @@
+PI_CODING_AGENT_DIR=/tmp/pi-agent HOME=/tmp/pi-home omp --print --mode json --model openai-codex/gpt-6-luna --session-dir /sandbox/pi-sessions --no-extensions --no-rules --no-title --max-time 2700 --approval-mode=yolo -e /sandbox/plugins/pi-probe/index.ts --config /sandbox/plugins/pi-probe/overlay-isolation.yml --skills=probe-*,repo-* -e /sandbox/plugins/statiker/omp/extension.ts

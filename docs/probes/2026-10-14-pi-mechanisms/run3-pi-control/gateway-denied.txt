@@ -1,0 +1,7 @@
+gateway log lines: 234; DENIED lines: 0; ALLOWED lines: 2
+
+DENIED (count, line):
+
+ALLOWED destinations (count, target):
+     1  chatgpt.com:443
+     1  GET http://chatgpt.com:443/backend-api/codex/responses

@@ -1,0 +1,1 @@
+PI_CODING_AGENT_DIR=/tmp/pi-agent pi --print --mode json --provider openai-codex --model gpt-6-luna --session-id c69d5f07-3c3c-40d2-b1fd-9e155758c4b3 --session-dir /sandbox/pi-sessions --no-extensions --no-skills --no-prompt-templates --no-mcp --no-approve --no-context-files --no-themes --offline

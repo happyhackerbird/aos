@@ -1,0 +1,7 @@
+# AOS repository policy (v2) for agent-os itself: an unattended run of this repository
+# executes in an OpenShell sandbox. The suite needs only the package index.
+[execution]
+fail_closed = true
+
+[network]
+allow = ["pypi.org:443", "files.pythonhosted.org:443"]

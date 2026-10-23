@@ -1,0 +1,419 @@
+{
+ "platform": "Linux x86_64 server",
+ "runtime_source": "3021bed4984eefda6083ed23a8d200dbc2ddd788",
+ "image": "aos-harness:release-da47c25",
+ "image_inspect_id": "sha256:8bbd0338963d266254cd4535307bb597aca40908d28b714ab475ac51c204b686",
+ "image_versions": "node=v24.21.0\nnpm=11.19.0\nclaude=2.1.296 (Claude Code)\ncodex=codex-cli 0.162.1\npi=1.1.0\nomp=omp/18.8.3\nuv=uv 0.13.0 (x86_64-unknown-linux-gnu)\npython=Python 3.12.15\nplaywright=Version 1.63.0\npoetry=Poetry (version 2.1.3)\nchromium=Chromium 155.0.8059.79 built on Debian GNU/Linux 12 (bookworm)\npostgresql=psql (PostgreSQL) 15.19 (Debian 15.19-0+deb12u1)\ntmux=tmux 3.3a\ndebian=12.15\nbase=node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20",
+ "gateway_version": "0.1.3",
+ "harness_timeout_s": 1800,
+ "interrupt_after_s": 45,
+ "configured_models": {
+  "claude": "claude-opus-5-5",
+  "codex": "CLI default; actual model unverified"
+ },
+ "not_run": {
+  "pi": "worker token expired; operator accepted release without Pi/omp cells on 2026-10-24",
+  "omp": "worker token expired; operator accepted release without Pi/omp cells on 2026-10-24"
+ },
+ "counts": {
+  "PASS": 20,
+  "FAIL": 0,
+  "BLOCKED": 0
+ },
+ "cells": [
+  {
+   "fixture": "demo-app",
+   "harness": "claude",
+   "scenario": "success",
+   "task": "AO-1",
+   "runs": [
+    "AO-1-r1"
+   ],
+   "status": "review",
+   "verdict": "pass",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "3db9bb258dea7e34fe4f692c7dfdd1a8fe0a841a",
+   "branch_tip": "3db9bb258dea7e34fe4f692c7dfdd1a8fe0a841a",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "demo-app",
+   "harness": "claude",
+   "scenario": "failed-verification",
+   "task": "AO-2",
+   "runs": [
+    "AO-2-r1"
+   ],
+   "status": "failed",
+   "verdict": "fail",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "6f316bcdd1903618a39f40330bd4926a20a9a3db",
+   "branch_tip": "6f316bcdd1903618a39f40330bd4926a20a9a3db",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "demo-app",
+   "harness": "claude",
+   "scenario": "interruption",
+   "task": "AO-3",
+   "runs": [
+    "AO-3-r1"
+   ],
+   "status": "cancelled",
+   "verdict": null,
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": null,
+   "branch_tip": null,
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "demo-app",
+   "harness": "claude",
+   "scenario": "retry",
+   "task": "AO-4",
+   "runs": [
+    "AO-4-r1",
+    "AO-4-r2"
+   ],
+   "status": "review",
+   "verdict": "pass",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "ba9313811e97ae946d110937d6897056e42b4b04",
+   "branch_tip": "ba9313811e97ae946d110937d6897056e42b4b04",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "demo-app",
+   "harness": "claude",
+   "scenario": "runner-kill",
+   "task": "AO-5",
+   "runs": [
+    "AO-5-r1"
+   ],
+   "status": "blocked",
+   "verdict": null,
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": null,
+   "branch_tip": null,
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "demo-app",
+   "harness": "codex",
+   "scenario": "success",
+   "task": "AO-6",
+   "runs": [
+    "AO-6-r1"
+   ],
+   "status": "review",
+   "verdict": "pass",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "6e4a0bfece97a994be02577eafdecae6ceba9a75",
+   "branch_tip": "6e4a0bfece97a994be02577eafdecae6ceba9a75",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "demo-app",
+   "harness": "codex",
+   "scenario": "failed-verification",
+   "task": "AO-7",
+   "runs": [
+    "AO-7-r1"
+   ],
+   "status": "failed",
+   "verdict": "fail",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "810d7a67aacdebeb0d77f86ec42c841331d2dd5d",
+   "branch_tip": "810d7a67aacdebeb0d77f86ec42c841331d2dd5d",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "demo-app",
+   "harness": "codex",
+   "scenario": "interruption",
+   "task": "AO-8",
+   "runs": [
+    "AO-8-r1"
+   ],
+   "status": "cancelled",
+   "verdict": null,
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": null,
+   "branch_tip": null,
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "demo-app",
+   "harness": "codex",
+   "scenario": "retry",
+   "task": "AO-9",
+   "runs": [
+    "AO-9-r1",
+    "AO-9-r2"
+   ],
+   "status": "review",
+   "verdict": "pass",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "fdcc9f8f2268634cb7fa7c39b5272ce244efeade",
+   "branch_tip": "fdcc9f8f2268634cb7fa7c39b5272ce244efeade",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "demo-app",
+   "harness": "codex",
+   "scenario": "runner-kill",
+   "task": "AO-10",
+   "runs": [
+    "AO-10-r1"
+   ],
+   "status": "blocked",
+   "verdict": null,
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": null,
+   "branch_tip": null,
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "claude",
+   "scenario": "success",
+   "task": "AO-11",
+   "runs": [
+    "AO-11-r1"
+   ],
+   "status": "review",
+   "verdict": "pass",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "20310e4892fb13b20916443f04a6c653fe973f8f",
+   "branch_tip": "20310e4892fb13b20916443f04a6c653fe973f8f",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "claude",
+   "scenario": "failed-verification",
+   "task": "AO-12",
+   "runs": [
+    "AO-12-r1"
+   ],
+   "status": "failed",
+   "verdict": "fail",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "51565c6a96a9db74187c67ba310dd92a0492b205",
+   "branch_tip": "51565c6a96a9db74187c67ba310dd92a0492b205",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "claude",
+   "scenario": "interruption",
+   "task": "AO-13",
+   "runs": [
+    "AO-13-r1"
+   ],
+   "status": "cancelled",
+   "verdict": null,
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": null,
+   "branch_tip": null,
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "claude",
+   "scenario": "retry",
+   "task": "AO-14",
+   "runs": [
+    "AO-14-r1",
+    "AO-14-r2"
+   ],
+   "status": "review",
+   "verdict": "pass",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "3a415b7f6f5d802691cda3e68510d1288fd0890f",
+   "branch_tip": "3a415b7f6f5d802691cda3e68510d1288fd0890f",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "claude",
+   "scenario": "runner-kill",
+   "task": "AO-15",
+   "runs": [
+    "AO-15-r1"
+   ],
+   "status": "blocked",
+   "verdict": null,
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": null,
+   "branch_tip": null,
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "codex",
+   "scenario": "success",
+   "task": "AO-16",
+   "runs": [
+    "AO-16-r1"
+   ],
+   "status": "review",
+   "verdict": "pass",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "03282cb2ef4009e048364e5d26dc23c26bb0b36d",
+   "branch_tip": "03282cb2ef4009e048364e5d26dc23c26bb0b36d",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "codex",
+   "scenario": "failed-verification",
+   "task": "AO-17",
+   "runs": [
+    "AO-17-r1"
+   ],
+   "status": "failed",
+   "verdict": "fail",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "b787d26e0b124da67162de520309d61761754ab5",
+   "branch_tip": "b787d26e0b124da67162de520309d61761754ab5",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "codex",
+   "scenario": "interruption",
+   "task": "AO-18",
+   "runs": [
+    "AO-18-r1"
+   ],
+   "status": "cancelled",
+   "verdict": null,
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": null,
+   "branch_tip": null,
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "codex",
+   "scenario": "retry",
+   "task": "AO-19",
+   "runs": [
+    "AO-19-r1",
+    "AO-19-r2"
+   ],
+   "status": "review",
+   "verdict": "pass",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "03020e2f8eb43a6a30bf1aa0259706ce10be3413",
+   "branch_tip": "03020e2f8eb43a6a30bf1aa0259706ce10be3413",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "codex",
+   "scenario": "runner-kill",
+   "task": "AO-20",
+   "runs": [
+    "AO-20-r1"
+   ],
+   "status": "blocked",
+   "verdict": null,
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": null,
+   "branch_tip": null,
+   "bus_group": "supported"
+  }
+ ],
+ "failures": [],
+ "readiness": {
+  "automatic_reachable": {
+   "expected": "run reaches review with the prompt written",
+   "met": true,
+   "run_status": "review",
+   "error": null,
+   "prompt_written": true,
+   "transient_run_credential_left": false,
+   "host_bus_health_before_after": [
+    200,
+    200
+   ]
+  },
+  "pull_reachable": {
+   "expected": "run reaches review with the prompt written",
+   "met": true,
+   "run_status": "review",
+   "error": null,
+   "prompt_written": true,
+   "transient_run_credential_left": false,
+   "host_bus_health_before_after": [
+    200,
+    200
+   ]
+  },
+  "automatic_unreachable": {
+   "expected": "refused before the prompt; host bus healthy",
+   "met": true,
+   "run_status": "blocked",
+   "error": "messaging readiness bus: authenticated sandbox probe failed",
+   "prompt_written": false,
+   "transient_run_credential_left": false,
+   "host_bus_health_before_after": [
+    200,
+    200
+   ]
+  },
+  "pull_unreachable": {
+   "expected": "refused before the prompt; host bus healthy",
+   "met": true,
+   "run_status": "blocked",
+   "error": "messaging readiness bus: authenticated sandbox probe failed",
+   "prompt_written": false,
+   "transient_run_credential_left": false,
+   "host_bus_health_before_after": [
+    200,
+    200
+   ]
+  }
+ },
+ "merged_acceptance": {
+  "fixture": "aos-example",
+  "task": "AO-11",
+  "exit": 0,
+  "status": "passed",
+  "head_sha": "20310e4892fb13b20916443f04a6c653fe973f8f",
+  "base_sha": "b75f6a67d980c7c21aa3184dcb21dae2fd2d5abe",
+  "pytest_passed": 9,
+  "pass_lines": 4,
+  "command_exits": [
+   0,
+   0
+  ],
+  "fresh_sandbox": true
+ },
+ "token_scan": {
+  "tokens_observed": 4,
+  "logs_with_a_token": []
+ }
+}

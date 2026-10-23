@@ -1,0 +1,87 @@
+{
+  "name": "cxm-mech",
+  "mode": "mech",
+  "phrases": {
+    "user-skill": "PHRASE-USER-d034bd",
+    "home-skill": "PHRASE-HOME-b033fe",
+    "repo-skill": "PHRASE-REPO-6e05ab",
+    "plugin-skill": "PHRASE-PLUGIN-5f1c7e"
+  },
+  "codeword": "CODEWORD-017e0b",
+  "command": "CODEX_HOME=/sandbox/codex-home codex exec --json --skip-git-repo-check --sandbox danger-full-access --dangerously-bypass-hook-trust -c approval_policy=\"never\" -c features.hooks=true -c features.multi_agent=true -c features.plugins=true -c features.apps=false \"$(cat /sandbox/prompt.txt)\"",
+  "effective_policy_problems": [],
+  "harness_seconds": 81.3,
+  "codex_auth_unchanged": true,
+  "gateway_denied_lines": 15,
+  "harness_rc": "0",
+  "timeline": [
+    {
+      "t": 1792016189.792,
+      "event": "sandbox.created",
+      "name": "cxm-mech",
+      "image": "aos-harness:comms"
+    },
+    {
+      "t": 1792016189.905,
+      "event": "policy.effective",
+      "problems": []
+    },
+    {
+      "t": 1792016190.429,
+      "event": "fixtures.installed"
+    },
+    {
+      "t": 1792016190.652,
+      "event": "codex_auth.uploaded"
+    },
+    {
+      "t": 1792016190.853,
+      "event": "prompt.uploaded"
+    },
+    {
+      "t": 1792016191.173,
+      "event": "job.released",
+      "bytes": 219881
+    },
+    {
+      "t": 1792016193.544,
+      "event": "harness.started"
+    },
+    {
+      "t": 1792016274.804,
+      "event": "harness.finished",
+      "seconds": 81.3
+    },
+    {
+      "t": 1792016281.203,
+      "event": "worktree_step.done",
+      "rc": 0
+    },
+    {
+      "t": 1792016281.59,
+      "event": "exec.reads_done",
+      "codex_auth_unchanged": true
+    },
+    {
+      "t": 1792016282.563,
+      "event": "downloads.done",
+      "files": [
+        "exec-reads.txt",
+        "harness.err",
+        "harness.out",
+        "harness.rc",
+        "probe-report.md"
+      ]
+    },
+    {
+      "t": 1792016282.607,
+      "event": "gateway.log_saved",
+      "lines": 628
+    },
+    {
+      "t": 1792016282.955,
+      "event": "sandbox.deleted",
+      "gone": true
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+Two throwaway sandboxes (image aos-harness:comms, provider aos-claude-oauth, main command
+`bash -lc 'sleep 3600'`), 2026-10-14 19:23-19:24 CEST, each deleted after its exec. Verbatim
+exec output and the supervisor log lines (`openshell logs <name>`), trimmed to the network lines.
+
+== p1b-dns: the rendered policy (aos-bus rule host.docker.internal:8012, repo rule pypi.org:443 and
+   files.pythonhosted.org:443, provider rule from aos-claude-oauth) ==
+
+/etc/hosts: only the loopback and IPv6 lines (no host.docker.internal entry)
+/etc/resolv.conf: nameserver 127.0.0.53 (the policy DNS)
+host.docker.internal: rc=2
+host.openshell.internal: rc=2
+pypi.org: 198.18.0.2      pypi.org
+api.anthropic.com: 198.18.0.3      api.anthropic.com
+example.com: 198.18.0.4      example.com
+http://host.docker.internal:8012/health -> rc=6 http=000
+http://host.openshell.internal:8012/health -> rc=6 http=000
+http://192.168.5.2:8012/health -> rc=7 http=000
+https://pypi.org/simple/ -> rc=28 http=200
+https://api.anthropic.com/ -> rc=0 http=404
+/proc/net/route: header only (no routes); no `ip` binary
+
+supervisor log:
+CONFIG:READY [INFO] Policy DNS connected to isolation boundary
+NET:OPEN [INFO] host.docker.internal:17670
+NET:REFUSE [MED] DENIED host.docker.internal [reason:policy_dns_trusted_gateway_unavailable]
+NET:REFUSE [MED] DENIED host.openshell.internal [reason:policy_dns_trusted_gateway_unavailable]
+CONFIG:PUBLISHED [INFO] Policy DNS mapped pypi.org resolved=151.101.0.223,... synthetic=198.18.0.2 ports=443
+CONFIG:PUBLISHED [INFO] Policy DNS mapped api.anthropic.com resolved=160.79.104.10 synthetic=198.18.0.3 ports=443
+NET:REFUSE [MED] DENIED example.com [reason:policy_dns_ineligible]
+CONFIG:OBSERVATION [INFO] Policy DNS staged unapproved name example.com synthetic=198.18.0.4 for TCP policy review
+[WARN] [openshell_supervisor_network::proxy] Denied staged transparent connection destination=192.168.5.2:8012 reason=endpoint 192.168.5.2:8012 is not allowed by any policy
+NET:OPEN [MED] DENIED /usr/bin/curl(0) -> 192.168.5.2:8012 [reason:transparent_tcp_policy_denied]
+NET:OPEN [INFO] ALLOWED /usr/bin/curl(0) -> pypi.org:443 [policy:repo engine:opa]
+NET:OPEN [INFO] ALLOWED /usr/bin/curl(0) -> api.anthropic.com:443 [policy:_provider_aos_claude_oauth engine:opa]
+
+For comparison, a plain `docker run --rm aos-harness:comms` container under the same Colima
+Docker resolves the alias: `getent hosts host.docker.internal` -> `192.168.5.2 host.docker.internal`
+(resolv.conf nameserver 192.168.5.2, Docker's embedded DNS). The sandbox's resolver is the
+supervisor's policy DNS instead, which maps only names it can resolve upstream.
+
+== p1b-dns2: the same policy plus the renderer's `services=(("192.168.5.2", 8012),)`
+   (an aos-services rule with the IPv4 literal) ==
+
+http://192.168.5.2:8012/health -> {"lanes":[...],"ok":true} rc=0 http=200
+http://192.168.5.2:8010/health -> rc=7 http=000
+http://host.docker.internal:8012/health -> rc=6 http=000
+
+So on this Mac the workload reaches the bus only through an IPv4-literal rule, the address
+being the one `openshell_services.DB_DEFAULTS["colima-mac"]` already hands the sandbox for the
+per-run database; the rendered aos-bus rule (host.docker.internal) gives no reach, as
+docs/reference/openshell-backend-setup.md recorded on 2026-10-12.

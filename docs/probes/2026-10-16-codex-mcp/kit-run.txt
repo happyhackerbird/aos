@@ -1,0 +1,56 @@
+### 1. a server in $CODEX_HOME/config.toml: offered as a namespace
+== base rc=0
+POST /v1/responses t=1792184080 tools=['exec_command', 'write_stdin', 'list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource', 'request_user_input', 'view_image', 'multi_agent_v1', 'mcp__stub', 'get_goal', 'create_goal', 'update_goal', '<web_search>']
+  TOOL {"type": "namespace", "name": "mcp__stub", "description": "Tools in the mcp__stub namespace.", "tools": [{"type": "function", "name": "stub_ping", "description": "Ping the stub.", "strict": false, "parameters": {"type": "object", "properties": {}}}]}
+start argv=['base'] mark=None
+### 2. the call: namespace + name works under approval_policy=never; a flat name is refused
+== ns rc=0
+  OUTPUT {"type": "function_call_output", "id": "fco_01a1467e-f050-7873-933b-b70373f5ca1a", "call_id": "call_1", "output": [{"type": "input_text", "text": "Wall time: 0.0016 seconds\nOutput:"}, {"type": "input_text", "text": "pong"}]}
+== flat rc=0
+  OUTPUT {"type": "function_call_output", "id": "fco_01a1467f-087f-79c3-a340-1436c8b012a9", "call_id": "call_1", "output": "unsupported call: mcp__stub__stub_ping"}
+### 2b. -c registration alone, aos-agent's tools
+"name": "aos_ask"
+"name": "aos_declare"
+"name": "mcp__aos"
+== conly rc=0
+### 3. a 130 s call: default limit, then tool_timeout_sec=1000
+== t130 rc=0
+  OUTPUT {"type": "function_call_output", "id": "fco_01a14681-3414-7b40-9d33-06b22208481d", "call_id": "call_1", "output": [{"type": "input_text", "text": "Wall time: 130.0113 seconds\nOutput:"}, {"type": "input_text", "text": "pong"}]}
+== t130x rc=0
+  OUTPUT {"type": "function_call_output", "id": "fco_01a14683-46df-7882-97b0-b7571ca450cf", "call_id": "call_1", "output": [{"type": "input_text", "text": "Wall time: 130.0233 seconds\nOutput:"}, {"type": "input_text", "text": "pong"}]}
+### 4. the repository's MCP files: .codex/config.toml, .mcp.json, .claude/mcp.json
+== repo rc=0
+POST /v1/responses t=1792184377 tools=['exec_command', 'write_stdin', 'list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource', 'request_user_input', 'view_image', 'multi_agent_v1', 'mcp__repocodex', 'mcp__stub', 'get_goal', 'create_goal', 'update_goal', '<web_search>']
+start argv=['REPO .codex/config.toml'] mark=None
+start argv=['repo'] mark=None
+### 4b. the same, the project marked untrusted, then trusted
+== untrust rc=0
+start argv=['untrust'] mark=None
+start argv=['REPO .codex/config.toml'] mark=None
+== trust rc=0
+start argv=['trust'] mark=None
+start argv=['REPO .codex/config.toml'] mark=None
+### 5. a repository server named like ours: config.toml's is replaced
+== clash rc=0
+start argv=['REPO stub'] mark=None
+### 6. -c defines aos; the repository's aos (args, env) and another server
+== cli rc=0
+POST /v1/responses t=1792184402 tools=['exec_command', 'write_stdin', 'list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource', 'request_user_input', 'view_image', 'multi_agent_v1', 'mcp__aos', 'mcp__other', 'get_goal', 'create_goal', 'update_goal', '<web_search>']
+start argv=['CLI aos'] mark=repo-env
+start argv=['REPO other'] mark=None
+== cli-env rc=0
+start argv=['CLI aos, env={}'] mark=repo-env
+start argv=['REPO other'] mark=None
+== inline rc=0
+start argv=['CLI inline table'] mark=repo-env
+start argv=['REPO other'] mark=None
+== envkey rc=0
+start argv=['CLI aos, env key set'] mark=cli
+start argv=['REPO other'] mark=None
+== disable rc=1
+Error loading config.toml: invalid transport
+### 7. the repository's env reaches the server's interpreter: PYTHONPATH with a json.py
+== pp rc=0
+evil log, plain python3: EVIL json imported
+== ppi rc=0
+evil log, python3 -I: none

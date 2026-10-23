@@ -1,0 +1,48 @@
+{
+  "phrases": {
+    "probe-skill": "PHRASE-PROBE-ae5b5b",
+    "probe-skill-home": "PHRASE-HOME-09023b",
+    "repo-skill": "PHRASE-REPO-70e86d"
+  },
+  "base_commit": "b75f6a67d980c7c21aa3184dcb21dae2fd2d5abe",
+  "fixture_commit": "5c9a455bd7371932cc22d6baa516efc830d844c0",
+  "plugins": {
+    "path": "/private/tmp/claude-501/-Users-operator-code-agent-os/732a9ebe-2df5-4c4d-a185-12afb60da8e5/scratchpad/pi/plugins2.tgz",
+    "bytes": 260226,
+    "sha256": "64a77af2d5a1cce85b960f26f7ade5b0bfa3119d4127435917edf69116c03690",
+    "members": 82,
+    "pi_probe_members": [
+      "pi-probe/agents",
+      "pi-probe/agents/omp",
+      "pi-probe/agents/omp/probe-agent-home.md",
+      "pi-probe/agents/omp/probe-agent.md",
+      "pi-probe/agents/pi",
+      "pi-probe/agents/pi/probe-agent.md",
+      "pi-probe/dispatch-guards.json",
+      "pi-probe/index.ts",
+      "pi-probe/overlay-isolation.yml",
+      "pi-probe/skills",
+      "pi-probe/skills/probe-skill",
+      "pi-probe/skills/probe-skill/SKILL.md",
+      "pi-probe/skills/probe-skill-home",
+      "pi-probe/skills/probe-skill-home/SKILL.md"
+    ],
+    "pi_dispatch_guards_commit": "0487a5d",
+    "statiker_fork_commit": "0e32484"
+  },
+  "pi_npm": {
+    "path": "/private/tmp/claude-501/-Users-operator-code-agent-os/732a9ebe-2df5-4c4d-a185-12afb60da8e5/scratchpad/pi/pi-npm078.tgz",
+    "bytes": 9233169,
+    "sha256": "ed8b443448ff9965b1f2109656e18a667d9a0310f1efe43ce7bc4ee3f4c30a7e",
+    "versions": {
+      "pi-subagents": "0.78.0",
+      "pi-intercom": "0.17.0"
+    },
+    "source": "/private/tmp/claude-501/-Users-operator-code-agent-os/732a9ebe-2df5-4c4d-a185-12afb60da8e5/scratchpad/pi/npm078/tree/node_modules"
+  },
+  "tarball": {
+    "path": "/private/tmp/claude-501/-Users-operator-code-agent-os/732a9ebe-2df5-4c4d-a185-12afb60da8e5/scratchpad/pi/job2.tgz",
+    "bytes": 220025,
+    "sha256": "42c02acf3343ea66f1c3c38f6e0e1305ac8568195bef043ec9cec91bce62dccd"
+  }
+}

@@ -1,0 +1,5 @@
+[
+  {"tool": "bash", "args": {"command": "sleep 6; echo one"}},
+  {"tool": "bash", "args": {"command": "sleep 6; echo two"}},
+  {"text": "All done. Final report: two commands ran, nothing else to report."}
+]

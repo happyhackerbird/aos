@@ -1,0 +1,7 @@
+{
+  "description": "aos messaging hooks for Codex (delivery probe): PostToolUse pulls and injects pending requests as additionalContext; Stop blocks once while an acknowledged request is unanswered",
+  "hooks": {
+    "PostToolUse": [{"hooks": [{"type": "command", "command": "/probe/aos-agent inbox --hook", "timeout": 10}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "/probe/aos-agent stop --hook", "timeout": 10}]}]
+  }
+}

@@ -1,0 +1,55 @@
+Version:      1
+Hash:         1dc503ee0b18ec115b9cc2e32b91cdf3a1538afe6771435606660251a8fbf83d
+Status:       Effective
+Source:       sandbox
+Config rev:   7091617475958797405
+---
+version: 1
+filesystem_policy:
+  include_workdir: true
+  read_only:
+    - /bin
+    - /usr
+    - /lib
+    - /lib64
+    - /etc
+    - /proc
+    - /dev/urandom
+    - /var/log
+  read_write:
+    - /tmp
+    - /dev/null
+    - /home/sandbox
+landlock:
+  compatibility: hard_requirement
+process:
+  run_as_user: "1000"
+  run_as_group: "1000"
+network_policies:
+  aos-bus:
+    name: aos-bus
+    endpoints:
+      - host: '192.168.5.2'
+        port: 8015
+    binaries:
+      - path: /**
+  harness:
+    name: harness
+    endpoints:
+      - host: chatgpt.com
+        port: 443
+      - host: auth.openai.com
+        port: 443
+      - host: ab.chatgpt.com
+        port: 443
+    binaries:
+      - path: /**
+  repo:
+    name: repo
+    endpoints:
+      - host: pypi.org
+        port: 443
+      - host: files.pythonhosted.org
+        port: 443
+    binaries:
+      - path: /**

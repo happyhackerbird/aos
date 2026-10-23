@@ -1,0 +1,42 @@
+version: 1
+filesystem_policy:
+  include_workdir: true
+  read_write:
+    - "/tmp"
+    - "/dev/null"
+    - "/home/sandbox"
+  read_only:
+    - "/bin"
+    - "/usr"
+    - "/lib"
+    - "/lib64"
+    - "/etc"
+    - "/proc"
+    - "/dev/urandom"
+    - "/var/log"
+landlock:
+  compatibility: hard_requirement
+process:
+  run_as_user: "1000"
+  run_as_group: "1000"
+network_policies:
+  aos-bus:
+    binaries:
+      - path: "/**"
+    endpoints:
+      - host: 192.168.5.2
+        port: 8015
+  repo:
+    binaries:
+      - path: "/**"
+    endpoints:
+      - host: pypi.org
+        port: 443
+      - host: files.pythonhosted.org
+        port: 443
+  harness:
+    binaries:
+      - path: "/**"
+    endpoints:
+      - host: chatgpt.com
+        port: 443

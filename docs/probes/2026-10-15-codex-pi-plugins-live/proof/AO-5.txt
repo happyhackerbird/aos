@@ -1,0 +1,26 @@
+commit 5a9c56875fec4aa44c4777c6e8901166960057d8
+author aos-proof <aos-proof@localhost>
+subject proof: pi plugins
+files:
+PROOF.md
+---- PROOF.md
+## tool
+PROBE-ECHO-OK hello-from-the-desk
+## skill
+Code phrase: PHRASE-PI-690d0f
+## ext-deny
+EXT_DENY_ME
+## subagent
+NO-SUBAGENT-TOOL: functions.read functions.bash functions.edit functions.write functions.probe_echo multi_tool_use.parallel
+## extension-fires
+{"t":1792087703.007,"event":"session_start","boundary":{"home":"/sandbox","cwd":"/sandbox/repo","pid":158,"argv0":"/usr/local/bin/node","token_entries":0,"env_keys_of_interest":["CLAUDE_CONFIG_DIR","CODEX_HOME","HOME","PI_CODING_AGENT","PI_CODING_AGENT_DIR","PI_OFFLINE","PI_SKIP_VERSION_CHECK"],"fetch":"error TypeError EACCES connect EACCES 198.18.0.2:443 - Local (0.0.0.0:0)","usr_write":"EACCES errno -13","state_write":"ok /sandbox/.local/state/pi-probe"}}
+{"t":1792087706.763,"event":"tool_call","tool":"probe_echo","input_head":"{\"text\":\"hello-from-the-desk\"}"}
+{"t":1792087706.763,"event":"probe_echo","text":"hello-from-the-desk"}
+{"t":1792087708.964,"event":"tool_call","tool":"read","input_head":"{\"path\":\"/sandbox/plugins/pi-probe/skills/proof-skill/SKILL.md\"}"}
+{"t":1792087710.562,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"printf '## tool\\\\n%s\\\\n' 'PROBE-ECHO-OK hello-from-the-desk' >> PROOF.md\"}"}
+{"t":1792087712.19,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"printf '## skill\\\\n%s\\\\n' 'Code phrase: PHRASE-PI-690d0f' >> PROOF.md\"}"}
+{"t":1792087713.448,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"echo EXT_DENY_ME\"}"}
+{"t":1792087713.449,"event":"tool_call","tool":"bash","decision":"block"}
+{"t":1792087714.707,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"printf '## ext-deny\\\\n%s\\\\n' 'EXT_DENY_ME' >> PROOF.md\"}"}
+{"t":1792087716.129,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"printf '## subagent\\\\nNO-SUBAGENT-TOOL: functions.read functions.bash functions.edit functions.write functions.probe_echo multi_tool_use.parallel\\\\n"}
+{"t":1792087717.89,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"{ echo '## extension-fires'; sed 's/EXT-DENY-M[E]/EXT_DENY_ME/g' \\\"$HOME/.local/share/pi-probe/fires.jsonl\\\"; } >> PROOF.md\"}"}

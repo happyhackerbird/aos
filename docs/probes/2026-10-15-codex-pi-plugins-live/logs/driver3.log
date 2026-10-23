@@ -1,0 +1,6 @@
+20:22:59 bus pid 23827 on 8016
+20:23:00 tasks omp-ext=AO-7
+20:23:00 run omp-ext AO-7
+20:24:22 omp-ext exit 0
+20:24:22 bus stopped
+20:24:22 done

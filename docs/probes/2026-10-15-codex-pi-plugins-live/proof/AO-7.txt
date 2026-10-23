@@ -1,0 +1,29 @@
+commit 47b1069f76ea38df761b093e2a6d38b6f4835c94
+author aos-proof <aos-proof@localhost>
+subject proof: pi plugins
+files:
+PROOF.md
+---- PROOF.md
+## tool
+PROBE-ECHO-OK hello-from-the-desk
+## skill
+Code phrase: PHRASE-PI-690d0f
+## ext-deny
+[pi-probe] denied by the probe extension (EXT_DENY_ME)
+## subagent
+NO-SUBAGENT-TOOL: read, bash, eval, glob, grep, wait, todo, write, web_search, edit, multi_tool_use.parallel
+## extension-fires
+{"t":1792088586.34,"event":"session_start","boundary":{"home":"/tmp/pi-home","cwd":"/sandbox/repo","pid":149,"argv0":"bun","token_entries":0,"env_keys_of_interest":["CLAUDE_CONFIG_DIR","CODEX_HOME","HOME","PI_CODING_AGENT_DIR","PI_NO_TITLE"],"fetch":"error TypeError ConnectionRefused Unable to connect. Is the computer able to access the url?","usr_write":"EACCES errno -13","state_write":"ok /tmp/pi-home/.local/state/pi-probe"}}
+{"t":1792088592.181,"event":"tool_call","tool":"todo","input_head":"{\"op\":\"init\",\"list\":[{\"phase\":\"Collect proof entries\",\"items\":[\"Read proof-skill instructions and probe_echo docs; invoke probe_echo once and record result\",\"Ru"}
+{"t":1792088594.336,"event":"tool_call","tool":"read","input_head":"{\"path\":\"skill://proof-skill/SKILL.md\"}"}
+{"t":1792088595.603,"event":"tool_call","tool":"read","input_head":"{\"path\":\"xd://probe_echo\"}"}
+{"t":1792088596.997,"event":"tool_call","tool":"write","input_head":"{\"path\":\"xd://probe_echo\",\"content\":\"{\\\"text\\\":\\\"hello-from-the-desk\\\"}\"}"}
+{"t":1792088596.998,"event":"tool_call","tool":"probe_echo","input_head":"{\"text\":\"hello-from-the-desk\"}"}
+{"t":1792088596.999,"event":"probe_echo","text":"hello-from-the-desk"}
+{"t":1792088600.251,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"printf '## tool\\\\n%s\\\\n' 'PROBE-ECHO-OK hello-from-the-desk' >> PROOF.md\",\"cwd\":\"/sandbox/repo\",\"pty\":false,\"async\":false}"}
+{"t":1792088603.029,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"printf '## skill\\\\n%s\\\\n' 'Code phrase: PHRASE-PI-690d0f' >> PROOF.md\",\"cwd\":\"/sandbox/repo\",\"pty\":false,\"async\":false}"}
+{"t":1792088606.915,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"echo EXT_DENY_ME\",\"cwd\":\"/sandbox/repo\",\"pty\":false,\"async\":false}"}
+{"t":1792088606.915,"event":"tool_call","tool":"bash","decision":"block"}
+{"t":1792088610.477,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"printf '## ext-deny\\\\n%s\\\\n' '[pi-probe] denied by the probe extension (EXT_DENY_ME)' >> PROOF.md\",\"cwd\":\"/sandbox/repo\",\"pty\":false,\"async\":false}"}
+{"t":1792088614.096,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"printf '## subagent\\\\nNO-SUBAGENT-TOOL: %s\\\\n' 'read, bash, eval, glob, grep, wait, todo, write, web_search, edit, multi_tool_use.parallel' >> PROOF"}
+{"t":1792088619.928,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"{ echo '## extension-fires'; sed 's/EXT-DENY-M[E]/EXT_DENY_ME/g' \\\"$HOME/.local/share/pi-probe/fires.jsonl\\\"; } >> PROOF.md\",\"cwd\":\"/sandbox/repo\",\""}

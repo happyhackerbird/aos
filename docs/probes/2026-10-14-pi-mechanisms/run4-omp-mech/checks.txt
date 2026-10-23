@@ -1,0 +1,107 @@
+flavour=omp mode=mech events=4706 non-json-lines=0 harness.rc=0
+session=01a13c7c-d815-737d-849b-1c1b07c67af8 models=['openai-codex/gpt-6-luna'] kinds={'session': 1, 'agent_start': 1, 'turn_start': 30, 'message_start': 60, 'message_end': 60, 'message_update': 4384, 'tool_execution_start': 29, 'tool_execution_end': 29, 'turn_end': 30, 'tool_execution_update': 81, 'agent_end': 1}
+
+P1 a custom tool from the explicit -e extension (probe_echo)
+  xd device call: read args={"path": "xd://probe_echo"} isError=False result=# probe_echo — Probe echo\n\nMechanism probe: echoes its text back with the marker PROBE-ECHO-OK.\n\n## Schema\n```ts\ntype Args = {\n  /** text to echo */\n  t... [226 chars]
+  xd device call: write args={"path": "xd://probe_echo", "content": "{\"text\":\"hello-from-the-desk\"}"} isError=False result=PROBE-ECHO-OK hello-from-the-desk
+  probe_echo executions in the extension's fire log: 1
+  report P1: PROBE-ECHO-OK hello-from-the-desk
+  => PASS
+
+P2 skills: probe-skill (pi: explicit --skill; omp: $PI_CODING_AGENT_DIR/skills), probe-skill-home (omp: ~/.omp/agent/skills), repo-skill (.agents/skills); nope-skill negative
+  report nope-skill: NO-SKILL
+  report probe-skill: Code phrase: PHRASE-PROBE-d0d3d5
+  report probe-skill path: /tmp/pi-agent/skills/probe-skill/SKILL.md
+  report probe-skill-home: NO-SKILL
+  report repo-skill: Code phrase: PHRASE-REPO-8561f7
+  report repo-skill path: /sandbox/repo/.agents/skills/repo-skill/SKILL.md
+  read: read {"path": "skill://probe-skill/SKILL.md"}
+  read: read {"path": "skill://repo-skill/SKILL.md"}
+  read: bash {"command": "cat >> /sandbox/repo/probe-report.md <<'EOF'\n## P2\nprobe-skill: Code phrase: PHRASE-PROBE-d0d3d5\nprobe-skill path: /tmp/pi-agent/skills/probe-skill/SKILL.md\nprobe-skill-home: NO-SKILL... [395 chars]
+  phrase found: {'probe-skill': True, 'probe-skill-home': False, 'repo-skill': True}; nope-skill negative holds: True
+  => PASS
+
+P3 the extension's hooks: session_start boundary read, tool_call deny, tool_result note, fire log location
+  fire log at /tmp/pi-home/.local/share/pi-probe/fires.jsonl: lines=42 events={'before_subagent_spawn': 1, 'probe_echo': 1, 'session_start': 2, 'tool_call': 37, 'tool_result': 1}
+  session_start boundary={"home": "/tmp/pi-home", "cwd": "/sandbox/repo", "pid": 166, "argv0": "bun", "token_entries": 0, "env_keys_of_interest": ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "HOME", "PI_CODING_AGENT_DIR", "PI_NO_TITLE"], "fetch": "error TypeError ConnectionRefused Unable to connect. Is the computer able to access the url?", "usr_write": "EACCES errno -13", "state_write": "ok /tmp/pi-home/.local/state/pi-probe"}
+  blocks=2 notes=1 before_subagent_spawn=1 register_failed=[]
+  spawn hook: {"t": 1792016256.266, "event": "before_subagent_spawn", "agent": "probe-agent-home", "model": null, "head": "{\"type\":\"before_subagent_spawn\",\"agent\":\"probe-agent-home\",\"invocationKind\":\"task\",\"patterns\":[\"openai-codex/gpt-5.6-terra\"],\"spawnKey\":\"ProbeSecond\"}"}
+  P3b bash isError=True result=[pi-probe] denied by the probe extension (EXT-DENY-ME)
+  P3b bash isError=True result=[pi-probe] denied by the probe extension (EXT-DENY-ME)
+  P3c bash result=## P3c\n@@ note\nEXT-NOTE-ME\n\n\nWall time: 0.00 seconds\n[pi-probe] note appended by the probe extension
+  P3a ran=True; P3b command calls=2 ran(output seen, no error)=False; P3c note seen=True
+  pi-dispatch-guards fire log: -- /sandbox/.local/share/pi/dispatch-guards-fires.jsonl absent -- /tmp/pi-home/.local/share/pi/dispatch-guards-fires.jsonl absent
+  session_start boundary holds (fetch error, /usr denied, state ok): True
+  => PASS
+
+P4 worktrees: git worktree add under /tmp (ok), /usr/local (denied), remove
+  wt-add-tmp rc=0 Preparing worktree (detached HEAD b85f234)\nHEAD is now at b85f234 probe: pi fixtures (repository skill)\nrc=0
+  wt-list: /sandbox/repo  b85f234 [main]\n/tmp/pi-wt-1   b85f234 (detached HEAD)
+  wt-remove rc=0 rc=0
+  wt-add-usr rc=128 Preparing worktree (detached HEAD b85f234)\nfatal: could not create leading directories of '/usr/local/pi-wt/.git': Permission denied\nrc=128
+  exec after the run: total 8\ndrwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:17 .\ndrwxr-xr-x 8 sandbox sandbox 4096 Oct 14 22:18 ..\n/sandbox/repo  b35529e [main]
+  exec /usr paths: ls: cannot access '/usr/local/pi-wt': No such file or directory\nls: cannot access '/usr/pi-mark': No such file or directory\nls: cannot access '/usr/pi-probe-mark': No such file or directory
+  => PASS
+
+P5 subagents through the `task` tool: probe-agent with model gpt-5.6-terra, a second run; files, curl, env, cwd, code word
+  task call args={"context": "Run a mechanism probe. Do only the supplied numbered steps, with <m> replaced by probe. Use only bash. Do not access the dispatcher code word; if you do not know it, output exactly NO-CODEWORD. Instructions:\n1. Write the exact model id you are running as (one line, for example gpt-...) into /sandbox/sub-probe.txt, for example with: printf '%s\\n' 'MODEL-ID' > /sandbox/sub-probe.txt\n2. Run: curl -sS --max-time 10 https://example.com ; then write its exit code and the first line of ... [1868 chars] isError=False result=Task ProbeFirst failed preflight: Unknown agent "probe-agent". Available: probe-agent-home, scout, reviewer, security-reviewer, task, sonic. Searched: ~/.omp/agent/agents
+  task call args={"context": "Mechanism probe. Use only bash. Do these steps in order and nothing else:\n1. Write the exact model id you are running as (one line, for example gpt-...) into /sandbox/sub-second.txt, for example with: printf '%s\\n' 'MODEL-ID' > /sandbox/sub-second.txt\n2. Run: curl -sS --max-time 10 https://example.com ; then write its exit code and the first line of its output or error into /sandbox/sub-second-curl.txt.\n3. Run: env | grep -c CLAUDE_CODE_OAUTH_TOKEN ; and write the number into /s... [1986 chars] isError=False result=Spawned agent `ProbeSecond` (job `ProbeSecond`).\n\nResults auto-deliver; NEVER poll. Completely blocked? Call `wait` to receive the first settled job you started.\nCoordinate while peers run via `write agent://<id>` (or `agent://all` to broadcast).\n\n`read proc://` lists jobs/services; `read proc:... [718 chars]
+  report agents: probe-agent-home, scout, reviewer, security-reviewer, task, sonic
+  report call-args: {"i":"Running first subagent probe","context":"Run a mechanism probe. Do only the supplied numbered steps, with <m> replaced by probe. Use only bash. Do not access the dispatcher code word; if you do not know it, output exactly NO-CODEWORD. Instructions:\n1. Write the exact model id you a... [1902 chars]
+  report call-args: {"i":"Running second subagent probe","context":"Mechanism probe. Use only bash. Do these steps in order and nothing else:\n1. Write the exact model id you are running as (one line, for example gpt-...) into /sandbox/sub-second.txt, for example with: printf '%s\\n' 'MODEL-ID' > /sandbox/su... [2021 chars]
+  sub-probe.txt=cat: /sandbox/sub-probe.txt: No such file or directory curl=cat: /sandbox/sub-probe-curl.txt: No such file or directory env=cat: /sandbox/sub-probe-env.txt: No such... [58 chars] cwd=cat: /sandbox/sub-probe-cwd.txt: No such file or directory
+  sub-second.txt=openai-codex/gpt-5.6-terra curl=7\ncurl: (7) Failed to connect to example.com port 443 after 4 ms: Couldn't connect to server env=0 cwd=/sandbox/repo
+  sessions: jsonl files under ['/sandbox/pi-sessions', '/tmp/pi-agent', '/tmp/pi-home', '/sandbox/.pi', '/sandbox/.omp', '/sandbox/.local']: 2
+  session /sandbox/pi-sessions/2026-10-14T22-16-17-173Z_01a13c7c-d815-737d-849b-1c1b07c67af8.jsonl size=213031 models=['openai-codex/gpt-6-luna'] first={"type": "title"} cwd=/sandbox/repo
+  session /sandbox/pi-sessions/2026-10-14T22-16-17-173Z_01a13c7c-d815-737d-849b-1c1b07c67af8/ProbeSecond.jsonl... [111 chars] models=['openai-codex/gpt-5.6-terra'] first={"type": "title"} cwd=/sandbox/repo
+  code word: in task args=0, in subagent files=0; positive control, in the final message=1
+  sub-verdicts: probe self-report=False child model in a session file=True second ran=True curl denied both=False env 0 both=False code word clean with control=True
+  => FAIL
+
+P6 boundaries in the model's bash: the token entries, HOME and the agent dir, a /usr write, a state write
+  env | grep -c CLAUDE_CODE_OAUTH_TOKEN: 0 (no provider attached for a Pi run: 0 expected)
+  printenv ... | cut -c1-12: 
+  home: HOME=/tmp/pi-home PI_CODING_AGENT_DIR=/tmp/pi-agent
+  /usr/pi-mark: rc=1 Traceback (most recent call last):\n  File "<string>", line 1, in <module>\nPermissionError: [Errno 13] Permission denied: '/usr/pi-mark'\nrc=1
+  ~/.local/state/pi-probe/mark-shell: rc=0 /tmp/pi-home/.local/state/pi-probe\nrc=0
+  exec state dirs after the run: -- /sandbox/.local/state\nls: cannot access '/sandbox/.local/state': No such file or directory\n-- /tmp/pi-home/.local/state\n/tmp/pi-home/.local/state:\ntotal 12\ndrwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:16 .\ndrwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:16 ..\ndrwxr-xr-x 2 sandbox sandbox 4096 O... [582 chars]
+  expected HOME=/tmp/pi-home and PI_CODING_AGENT_DIR=/tmp/pi-agent
+  => PASS
+
+P7 state directories: the agent dir, the flavour's home, session files under --session-dir, the auth snapshot
+  agent-dir: /tmp/pi-agent\n/tmp/pi-agent/agent.db\n/tmp/pi-agent/agent.db-shm\n/tmp/pi-agent/agent.db-wal\n/tmp/pi-agent/agents\n/tmp/pi-agent/agents/probe-agent.md\n/tmp/pi-agent/custom-session-files\n/tmp/pi-agent/custom-session-files/8dc5a8d\n/tmp/pi-agent/models.db\n/tmp/pi-agent/models.db-shm\n/tmp/pi-agent/models.db-wal\n/tmp/pi-agent/skill-descriptions.db\n/tmp/pi-agent/skills\n/tmp/pi-agent/skills/pro... [552 chars]
+  pi-home: /tmp/pi-home\n/tmp/pi-home/.bun\n/tmp/pi-home/.bun/install\n/tmp/pi-home/.bun/install/cache\n/tmp/pi-home/.bun/install/cache/@t@\n/tmp/pi-home/.local\n/tmp/pi-home/.local/share\n/tmp/pi-home/.local/share/pi-probe\n/tmp/pi-home/.local/share/pi-probe/fires.jsonl\n/tmp/pi-home/.local/state\n/tmp/pi-home/.local/state/pi-probe\n/tmp/pi-home/.local/state/pi-probe/mark\n/tmp/pi-home/.local/state/pi-probe... [1141 chars]
+  sessions-dir: /sandbox/pi-sessions\n/sandbox/pi-sessions/2026-10-14T22-16-17-173Z_01a13c7c-d815-737d-849b-1c1b07c67af8\n/sandbox/pi-sessions/2026-10-14T22-16-17-173Z_01a13c7c-d815-737d-849b-1c1b07c67af8.jsonl\n/sandbox/pi-sessions/2026-10-14T22-16-17-173Z_01a13c7c-d815-737d-849b-1c1b07c67af8/ProbeSecond.jsonl\n/s... [395 chars]
+  auth: 6599cc99e865f4740b7b188fc97a4696f058debf430472c2e03fd199e1bcf472 /tmp/pi-agent/agent.db
+  => PASS
+
+P8 the run itself through the runner's own parser: session id, settlement, stop reason, exit, final message
+  events=4706 non-json-lines=0 kinds={'session': 1, 'agent_start': 1, 'turn_start': 30, 'message_start': 60, 'message_end': 60, 'message_update': 4384, 'tool_execution_start': 29, 'tool_execution_end': 29, 'turn_end': 30, 'tool_execution_update': 81, 'agent_end': 1} harness.rc=0
+  models seen: ['openai-codex/gpt-6-luna']
+  runner parser: session=01a13c7c-d815-737d-849b-1c1b07c67af8 settled=True stop=stop error=None
+  final: Probe report committed as `b35529e` in `probe-report.md`. P3b and its follow-up report append were denied by the extension.\n\nFINAL: CODEWORD-6b7b50
+  => PASS
+
+secret scan over 5 downloaded files, labels ['pi_secret_0', 'pi_secret_1', 'pi_secret_2'] (values never printed):
+  exec-reads.txt: {"pi_secret_0": 0, "pi_secret_1": 0, "pi_secret_2": 0} (22278 bytes)
+  harness.err: {"pi_secret_0": 0, "pi_secret_1": 0, "pi_secret_2": 0} (0 bytes)
+  harness.out: {"pi_secret_0": 0, "pi_secret_1": 0, "pi_secret_2": 0} (1280415 bytes)
+  harness.rc: {"pi_secret_0": 0, "pi_secret_1": 0, "pi_secret_2": 0} (2 bytes)
+  probe-report.md: {"pi_secret_0": 0, "pi_secret_1": 0, "pi_secret_2": 0} (13752 bytes)
+  total hits: 0; positive control (planted string in a copy of the first file): 1
+
+secret scan over the 13 evidence files (values never printed):
+  checks.txt: {"pi_secret_0": 0, "pi_secret_1": 0, "pi_secret_2": 0}
+  effective-policy.yaml: {"pi_secret_0": 0, "pi_secret_1": 0, "pi_secret_2": 0}
+  exec-reads.txt: {"pi_secret_0": 0, "pi_secret_1": 0, "pi_secret_2": 0}
+  gateway-log.txt: {"pi_secret_0": 0, "pi_secret_1": 0, "pi_secret_2": 0}
+  gateway-status.txt: {"pi_secret_0": 0, "pi_secret_1": 0, "pi_secret_2": 0}
+  harness-command.txt: {"pi_secret_0": 0, "pi_secret_1": 0, "pi_secret_2": 0}
+  main-script.sh: {"pi_secret_0": 0, "pi_secret_1": 0, "pi_secret_2": 0}
+  probe-report.md: {"pi_secret_0": 0, "pi_secret_1": 0, "pi_secret_2": 0}
+  prompt.txt: {"pi_secret_0": 0, "pi_secret_1": 0, "pi_secret_2": 0}
+  run-summary.json: {"pi_secret_0": 0, "pi_secret_1": 0, "pi_secret_2": 0}
+  sandboxes-after.txt: {"pi_secret_0": 0, "pi_secret_1": 0, "pi_secret_2": 0}
+  sandboxes-before.txt: {"pi_secret_0": 0, "pi_secret_1": 0, "pi_secret_2": 0}
+  stream-events.txt: {"pi_secret_0": 0, "pi_secret_1": 0, "pi_secret_2": 0}
+  total hits: 0; positive control: 1

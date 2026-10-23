@@ -1,0 +1,81 @@
+{
+  "name": "cxm-control",
+  "mode": "control",
+  "phrases": {
+    "user-skill": "PHRASE-USER-09150e",
+    "home-skill": "PHRASE-HOME-0df55d",
+    "repo-skill": "PHRASE-REPO-4fb6f0"
+  },
+  "codeword": "CODEWORD-2cce6b",
+  "command": "CODEX_HOME=/sandbox/codex-home codex exec --json --skip-git-repo-check --sandbox danger-full-access -c approval_policy=\"never\" -c features.hooks=false -c features.multi_agent=false -c features.plugins=false -c features.apps=false \"$(cat /sandbox/prompt.txt)\"",
+  "effective_policy_problems": [],
+  "harness_seconds": 61.0,
+  "codex_auth_unchanged": true,
+  "gateway_denied_lines": 6,
+  "harness_rc": "0",
+  "timeline": [
+    {
+      "t": 1792015548.748,
+      "event": "sandbox.created",
+      "name": "cxm-control",
+      "image": "aos-harness:comms"
+    },
+    {
+      "t": 1792015548.859,
+      "event": "policy.effective",
+      "problems": []
+    },
+    {
+      "t": 1792015549.144,
+      "event": "fixtures.installed"
+    },
+    {
+      "t": 1792015549.379,
+      "event": "codex_auth.uploaded"
+    },
+    {
+      "t": 1792015549.542,
+      "event": "prompt.uploaded"
+    },
+    {
+      "t": 1792015549.871,
+      "event": "job.released",
+      "bytes": 219977
+    },
+    {
+      "t": 1792015552.058,
+      "event": "harness.started"
+    },
+    {
+      "t": 1792015613.058,
+      "event": "harness.finished",
+      "seconds": 61.0
+    },
+    {
+      "t": 1792015613.396,
+      "event": "exec.reads_done",
+      "codex_auth_unchanged": true
+    },
+    {
+      "t": 1792015614.322,
+      "event": "downloads.done",
+      "files": [
+        "exec-reads.txt",
+        "harness.err",
+        "harness.out",
+        "harness.rc",
+        "probe-report.md"
+      ]
+    },
+    {
+      "t": 1792015614.365,
+      "event": "gateway.log_saved",
+      "lines": 381
+    },
+    {
+      "t": 1792015614.607,
+      "event": "sandbox.deleted",
+      "gone": true
+    }
+  ]
+}

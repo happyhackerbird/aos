@@ -1,0 +1,243 @@
+== install ==
+/sandbox/.pi:
+total 12
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:15 .
+drwx------ 1 sandbox sandbox 4096 Oct 14 22:15 ..
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:15 agent
+
+/sandbox/.pi/agent:
+total 16
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:15 .
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:15 ..
+-rw-r--r-- 1 sandbox sandbox   72 Oct 14 22:15 dispatch-guards.json
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:15 npm
+
+/sandbox/.pi/agent/npm:
+total 8
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:15 .
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:15 ..
+lrwxrwxrwx 1 sandbox sandbox   36 Oct 14 22:15 node_modules -> /sandbox/plugins/pi-npm/node_modules
+
+/tmp/pi-agent:
+total 12
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:15 .
+drwxrwxrwt 1 root    root    4096 Oct 14 22:15 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:15 agents
+
+/tmp/pi-agent/agents:
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:15 .
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:15 ..
+-rw-r--r-- 1 sandbox sandbox  497 Oct 14 22:15 probe-agent.md
+
+== pre-env ==
+uid=1000 HOME=/sandbox PI_CODING_AGENT_DIR=unset
+exec env CLAUDE_CODE_OAUTH_TOKEN entries: 0
+== pre-version ==
+1.1.0
+== pre-help-flags ==
+  --extension, -e <path>         Load an extension file or builtin:<name> (can be used multiple times)
+  --no-extensions, -ne           Disable extension discovery and built-in extensions (explicit -e paths still work)
+  --skill <path>                 Load a skill file or directory (can be used multiple times)
+  --no-skills, -ns               Disable skills discovery and loading
+== pre-fixtures ==
+/sandbox/plugins:
+total 20
+drwxr-xr-x 5 sandbox sandbox 4096 Oct 14 22:15 .
+drwx------ 1 sandbox sandbox 4096 Oct 14 22:15 ..
+drwxr-xr-x 4 sandbox sandbox 4096 Sep 15 14:51 pi-dispatch-guards
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 pi-probe
+drwxr-xr-x 9 sandbox sandbox 4096 Oct 13 15:29 statiker
+
+/sandbox/plugins/pi-dispatch-guards:
+total 36
+drwxr-xr-x 4 sandbox sandbox 4096 Sep 15 14:51 .
+drwxr-xr-x 5 sandbox sandbox 4096 Oct 14 22:15 ..
+-rw-r--r-- 1 sandbox sandbox   14 Sep 15 14:50 .gitignore
+-rw-r--r-- 1 sandbox sandbox 2734 Sep 15 14:51 README.md
+-rw-r--r-- 1 sandbox sandbox 6753 Sep 15 14:49 index.ts
+-rw-r--r-- 1 sandbox sandbox  404 Sep 15 14:50 package.json
+drwxr-xr-x 2 sandbox sandbox 4096 Sep 15 14:49 src
+drwxr-xr-x 2 sandbox sandbox 4096 Sep 15 14:51 test
+
+/sandbox/plugins/pi-dispatch-guards/src:
+total 20
+drwxr-xr-x 2 sandbox sandbox  4096 Sep 15 14:49 .
+drwxr-xr-x 4 sandbox sandbox  4096 Sep 15 14:51 ..
+-rw-r--r-- 1 sandbox sandbox 11405 Sep 15 14:49 guards.ts
+
+/sandbox/plugins/pi-dispatch-guards/test:
+total 24
+drwxr-xr-x 2 sandbox sandbox 4096 Sep 15 14:51 .
+drwxr-xr-x 4 sandbox sandbox 4096 Sep 15 14:51 ..
+-rw-r--r-- 1 sandbox sandbox 5283 Sep 15 14:51 e2e.ts
+-rw-r--r-- 1 sandbox sandbox 4790 Sep 15 14:50 guards.test.ts
+
+/sandbox/plugins/pi-probe:
+total 32
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 .
+drwxr-xr-x 5 sandbox sandbox 4096 Oct 14 22:15 ..
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 agents
+-rw-r--r-- 1 sandbox sandbox   72 Oct 14 22:08 dispatch-guards.json
+-rw-r--r-- 1 sandbox sandbox 5196 Oct 14 22:08 index.ts
+-rw-r--r-- 1 sandbox sandbox   37 Oct 14 22:08 overlay-isolation.yml
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 skills
+
+/sandbox/plugins/pi-probe/agents:
+total 16
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:08 omp
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:08 pi
+
+/sandbox/plugins/pi-probe/agents/omp:
+total 16
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:08 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 ..
+-rw-r--r-- 1 sandbox sandbox  441 Oct 14 22:08 probe-agent-home.md
+-rw-r--r-- 1 sandbox sandbox  440 Oct 14 22:08 probe-agent.md
+
+/sandbox/plugins/pi-probe/agents/pi:
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:08 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 ..
+-rw-r--r-- 1 sandbox sandbox  497 Oct 14 22:08 probe-agent.md
+
+/sandbox/plugins/pi-probe/skills:
+total 16
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:08 probe-skill
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:08 probe-skill-home
+
+/sandbox/plugins/pi-probe/skills/probe-skill:
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:08 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 ..
+-rw-r--r-- 1 sandbox sandbox  413 Oct 14 22:08 SKILL.md
+
+/sandbox/plugins/pi-probe/skills/probe-skill-home:
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:08 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 ..
+-rw-r--r-- 1 sandbox sandbox  395 Oct 14 22:08 SKILL.md
+== pre-auth ==
+600 sandbox /tmp/pi-agent/auth.json
+stat: cannot statx '/tmp/pi-agent/agent.db': No such file or directory
+
+== early-repo ==
+dot-git is a directory (full clone)
+b85f2343ba81a4fb8ca369ba0b4c70b26992b559
+b85f234 probe: pi fixtures (repository skill)
+b75f6a6 README: aos run under AOS has no --dry-run on the OpenShell route
+1447ca5 OpenShell: v2 policy, sandbox-safe Chromium flags, runner-provided database and evidence contract
+.agents/skills/repo-skill/SKILL.md
+ls: cannot access '.git/worktrees': No such file or directory
+== early-procs ==
+pid 56: bash -lc set -u
+mkdir -p /tmp/claude-home /tmp/pi-agent /tmp/pi-home /sandbox/codex-home /sandbox/incoming /sandbox/pi-sessions
+export CLAUDE_CONFIG_DIR=/tmp/claude-home PI_CODING_AGENT_DIR=/tmp/pi-agent CODEX_HOME=/sandbox/codex-home
+aos_deadline=$(( $(date +%s) + 4200 ))
+while [ ! -f /sandbox/job.tgz ]; do [ "$(date +%s)" -lt "$aos_deadline" ] || exit 1; sleep 1; done
+if [ -f /sandbox/services.env ]; then . /sandbox/services.env; fi
+mkdir -p /sandbox/repo && tar xzf /sandbox/job.tgz -C /sandbox/repo
+cd /sandbox/repo
+aos_harness() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --kill-after=30 2700 bash -c 'PI_CODING_AGENT_DIR=/tmp/pi-agent pi --print --mode json --provider openai-codex --model gpt-6-luna --session-id c69d5
+  fi
+  bash -c 'PI_CODING_AGENT_DIR=/tmp/pi-agent pi --print --mode json --provider openai-codex --model gpt-6-luna --session-id c69d5f07-3c3c-40d2-b1fd-9e155758c4b3
+  ( sleep 2700; kill -TERM "$aos_hp" 2>/dev/null; sleep 30; kill -KILL "$aos_hp" 2>/dev/null ) </dev/null >/dev/null 2>&1 & aos_wp=$!
+  wait "$aos_hp"; aos_rc=$?; kill "$aos_wp" 2>/dev/null; return $aos_rc
+}
+date +%s%N > /sandbox/harness.started
+aos_harness </sandbox/prompt.txt >/sandbox/harness.out 2>/sandbox/harness.err
+rc=$?; for p in $(pgrep -u "$(id -u)"); do case "$p" in 1|$$|$PPID) ;; *) kill "$p" 2>/dev/null || true;; esac; done; sleep 1; for p in $(pgrep -u "$(id -u)"); 
+sleep 4200
+
+== subagent-files ==
+-- /sandbox/sub-probe.txt
+cat: /sandbox/sub-probe.txt: No such file or directory
+-- /sandbox/sub-probe-curl.txt
+cat: /sandbox/sub-probe-curl.txt: No such file or directory
+-- /sandbox/sub-probe-env.txt
+cat: /sandbox/sub-probe-env.txt: No such file or directory
+-- /sandbox/sub-probe-cwd.txt
+cat: /sandbox/sub-probe-cwd.txt: No such file or directory
+-- /sandbox/sub-second.txt
+cat: /sandbox/sub-second.txt: No such file or directory
+-- /sandbox/sub-second-curl.txt
+cat: /sandbox/sub-second-curl.txt: No such file or directory
+-- /sandbox/sub-second-env.txt
+cat: /sandbox/sub-second-env.txt: No such file or directory
+-- /sandbox/sub-second-cwd.txt
+cat: /sandbox/sub-second-cwd.txt: No such file or directory
+== firelog ==
+-- /sandbox/.local/share/pi-probe/fires.jsonl absent
+-- /tmp/pi-home/.local/share/pi-probe/fires.jsonl absent
+-- /sandbox/.local/share/pi/dispatch-guards-fires.jsonl absent
+-- /tmp/pi-home/.local/share/pi/dispatch-guards-fires.jsonl absent
+== state ==
+-- /sandbox/.local/state
+/sandbox/.local/state:
+total 12
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:15 .
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:15 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:15 pi-probe
+
+/sandbox/.local/state/pi-probe:
+total 8
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:15 .
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:15 ..
+-rw-r--r-- 1 sandbox sandbox    0 Oct 14 22:15 mark-shell
+-- /tmp/pi-home/.local/state
+ls: cannot access '/tmp/pi-home/.local/state': No such file or directory
+== worktrees ==
+ls: cannot access '.git/worktrees': No such file or directory
+/sandbox/repo  cab6835 [main]
+== usr-paths ==
+ls: cannot access '/usr/local/pi-wt': No such file or directory
+ls: cannot access '/usr/pi-mark': No such file or directory
+ls: cannot access '/usr/pi-probe-mark': No such file or directory
+== agent-dir ==
+/tmp/pi-agent
+/tmp/pi-agent/agents
+/tmp/pi-agent/agents/probe-agent.md
+/tmp/pi-agent/auth.json
+/tmp/pi-agent/models-store.json
+600 /tmp/pi-agent/auth.json
+stat: cannot statx '/tmp/pi-agent/agent.db': No such file or directory
+== pi-home ==
+/tmp/pi-home
+== sessions-dir ==
+/sandbox/pi-sessions
+/sandbox/pi-sessions/2026-10-14T22-15-44-352Z_c69d5f07-3c3c-40d2-b1fd-9e155758c4b3.jsonl
+== auth-sha ==
+ece656a010dbd1a1c7fd10e1eb1a34e5b1ee1bc0de0994c96b5096ed17f1dbd5 /tmp/pi-agent/auth.json
+== repo-after ==
+cab6835 probe: pi mechanism report (control)
+b85f234 probe: pi fixtures (repository skill)
+b75f6a6 README: aos run under AOS has no --dry-run on the OpenShell route
+1447ca5 OpenShell: v2 policy, sandbox-safe Chromium flags, runner-provided database and evidence contract
+f61e398 pyproject: declare the Apache-2.0 license and LICENSE file (as agent-os)
+== tmp ==
+total 24
+drwxrwxrwt 1 root    root    4096 Oct 14 22:15 .
+drwxr-xr-x 1 root    root    4096 Oct 14 22:15 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:15 claude-home
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:15 node-compile-cache
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:15 pi-agent
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:15 pi-home
+
+== sessions ==
+jsonl files under ['/sandbox/pi-sessions', '/tmp/pi-agent', '/tmp/pi-home', '/sandbox/.pi', '/sandbox/.omp', '/sandbox/.local']: 1
+-- /sandbox/pi-sessions/2026-10-14T22-15-44-352Z_c69d5f07-3c3c-40d2-b1fd-9e155758c4b3.jsonl size=32667
+   first={"type": "session", "id": "c69d5f07-3c3c-40d2-b1fd-9e155758c4b3", "cwd": "/sandbox/repo"} cwd=/sandbox/repo
+   assistant models=['openai-codex/gpt-6-luna'] kinds={"message": 19, "model_change": 1, "session": 1, "thinking_level_change": 1}
+
+== in-sandbox-scan ==
+secret labels read inside the sandbox: ['access', 'accountId']
+files under /sandbox holding a pi secret: {'access': 0, 'accountId': 0}; control 'aos-policy': 2
+files under /tmp holding a pi secret: {'access': 0, 'accountId': 0}; control 'pi-agent': 1
+files under /home/sandbox holding a pi secret: {'access': 0, 'accountId': 0}; control 'PS1': 1
+pi secrets in the decompressed git objects: {k: objs.count(v) for k, v in values.items()}; control 'pi fixtures': 1

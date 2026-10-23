@@ -1,0 +1,10 @@
+22:59:01 repo at b75f6a6
+22:59:02 bus pid 33760 on 8019
+22:59:03 task AO-1
+22:59:03 note operator-i1
+22:59:03 run AO-1
+22:59:18 question AO-1-i1 seen
+22:59:18 answered AO-1-i1
+23:00:04 run exit 0
+23:00:05 bus stopped
+23:00:05 done

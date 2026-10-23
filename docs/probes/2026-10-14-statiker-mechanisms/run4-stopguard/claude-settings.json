@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "allow": [
+      "Bash(*)",
+      "Read(*)",
+      "Edit(*)",
+      "Write(*)",
+      "Agent(*)",
+      "Skill(*)"
+    ],
+    "deny": [
+      "WebFetch",
+      "WebSearch",
+      "mcp__*"
+    ]
+  },
+  "sandbox": {
+    "enabled": false
+  },
+  "disableAllHooks": false,
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /sandbox/plugins/statiker/hooks/statiker_stop_guard.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

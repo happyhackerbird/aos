@@ -1,0 +1,84 @@
+{
+  "name": "pim-omp-toolsoff",
+  "flavour": "omp",
+  "mode": "tools-off",
+  "model": "openai-codex/gpt-6-luna",
+  "phrases": {
+    "probe-skill": "PHRASE-PROBE-b270cc",
+    "probe-skill-home": "PHRASE-HOME-468637",
+    "repo-skill": "PHRASE-REPO-19b069"
+  },
+  "auth": "PiAuth(expires_ms=1792687336000, expiry_source='jwt')",
+  "codeword": "CODEWORD-08f104",
+  "session_id": null,
+  "command": "PI_CODING_AGENT_DIR=/tmp/pi-agent HOME=/tmp/pi-home omp --print --mode json --model openai-codex/gpt-6-luna --session-dir /sandbox/pi-sessions --no-extensions --no-skills --no-rules --no-title --max-time 2700 --approval-mode=yolo --tools=read,bash,edit,eval,glob,grep,wait,todo,write,web_search",
+  "effective_policy_problems": [],
+  "harness_seconds": 40.8,
+  "gateway_denied_lines": 14,
+  "harness_rc": "0",
+  "timeline": [
+    {
+      "t": 1792086661.029,
+      "event": "sandbox.created",
+      "name": "pim-omp-toolsoff",
+      "image": "aos-harness:comms"
+    },
+    {
+      "t": 1792086661.145,
+      "event": "policy.effective",
+      "problems": []
+    },
+    {
+      "t": 1792086661.454,
+      "event": "fixtures.installed"
+    },
+    {
+      "t": 1792086661.67,
+      "event": "pi_auth.uploaded",
+      "path": "/tmp/pi-agent/agent.db"
+    },
+    {
+      "t": 1792086661.862,
+      "event": "prompt.uploaded"
+    },
+    {
+      "t": 1792086662.582,
+      "event": "job.released",
+      "bytes": 227483
+    },
+    {
+      "t": 1792086664.94,
+      "event": "harness.started"
+    },
+    {
+      "t": 1792086705.754,
+      "event": "harness.finished",
+      "seconds": 40.8
+    },
+    {
+      "t": 1792086706.69,
+      "event": "exec.reads_done"
+    },
+    {
+      "t": 1792086707.567,
+      "event": "downloads.done",
+      "files": [
+        "exec-reads.txt",
+        "harness.err",
+        "harness.out",
+        "harness.rc",
+        "probe-report.md"
+      ]
+    },
+    {
+      "t": 1792086707.609,
+      "event": "gateway.log_saved",
+      "lines": 290
+    },
+    {
+      "t": 1792086707.949,
+      "event": "sandbox.deleted",
+      "gone": true
+    }
+  ]
+}

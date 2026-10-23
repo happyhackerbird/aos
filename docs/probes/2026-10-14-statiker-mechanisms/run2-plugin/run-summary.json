@@ -1,0 +1,86 @@
+{
+  "name": "stkm-plugin",
+  "mode": "plugin",
+  "model": "sonnet",
+  "budget_usd": 8,
+  "max_turns": 120,
+  "codeword": "CODEWORD-74e1a7",
+  "effective_policy_problems": [],
+  "harness_seconds": 132.7,
+  "codex_auth_unchanged": true,
+  "gateway_denied_lines": 54,
+  "harness_rc": "0",
+  "timeline": [
+    {
+      "t": 1792012361.31,
+      "event": "sandbox.created",
+      "name": "stkm-plugin",
+      "image": "aos-harness:comms"
+    },
+    {
+      "t": 1792012361.412,
+      "event": "policy.effective",
+      "problems": []
+    },
+    {
+      "t": 1792012361.661,
+      "event": "plugins.extracted"
+    },
+    {
+      "t": 1792012361.892,
+      "event": "codex_auth.uploaded"
+    },
+    {
+      "t": 1792012362.216,
+      "event": "settings_prompt.uploaded"
+    },
+    {
+      "t": 1792012362.508,
+      "event": "job.released",
+      "bytes": 335967
+    },
+    {
+      "t": 1792012364.727,
+      "event": "harness.started"
+    },
+    {
+      "t": 1792012497.385,
+      "event": "harness.finished",
+      "seconds": 132.7
+    },
+    {
+      "t": 1792012497.756,
+      "event": "exec.reads_done",
+      "codex_auth_unchanged": true
+    },
+    {
+      "t": 1792012499.176,
+      "event": "downloads.done",
+      "files": [
+        "codex-r6a.err.txt",
+        "codex-r6a.out.txt",
+        "codex-r6b.err.txt",
+        "codex-r6b.out.txt",
+        "codex-r6c.err.txt",
+        "codex-r6c.out.txt",
+        "codex-r6d.err.txt",
+        "codex-r6d.out.txt",
+        "exec-reads.txt",
+        "harness.err",
+        "harness.out",
+        "harness.rc",
+        "probe-report.md"
+      ]
+    },
+    {
+      "t": 1792012499.219,
+      "event": "gateway.log_saved",
+      "lines": 847
+    },
+    {
+      "t": 1792012499.453,
+      "event": "sandbox.deleted",
+      "gone": true
+    }
+  ]
+}

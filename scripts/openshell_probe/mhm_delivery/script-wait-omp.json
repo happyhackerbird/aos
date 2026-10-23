@@ -1,0 +1,5 @@
+[
+  {"tool": "mcp__aos_ask", "args": {"to": "operator", "text": "May I proceed?"}},
+  {"tool": "mcp__aos_wait", "args": {"id": "AO-7-i1", "timeout_s": 130}},
+  {"text": "All done. Final report: asked and waited."}
+]

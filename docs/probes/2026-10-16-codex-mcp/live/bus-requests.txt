@@ -1,0 +1,32 @@
+"POST /tasks HTTP/1.1" 200 OK
+"POST /tasks/operator/intents HTTP/1.1" 200 OK
+"POST /tasks/AO-1/ready HTTP/1.1" 200 OK
+"GET /tasks/AO-1/intents HTTP/1.1" 200 OK
+"GET /capabilities HTTP/1.1" 200 OK
+"GET /tasks/AO-1 HTTP/1.1" 200 OK
+"POST /tasks/AO-1/claim HTTP/1.1" 200 OK
+"POST /runs/AO-1-r1/start HTTP/1.1" 200 OK
+"POST /runs/AO-1-r1/progress HTTP/1.1" 200 OK
+"GET /tasks/AO-1/intents HTTP/1.1" 200 OK
+"GET /tasks/AO-1/intents HTTP/1.1" 200 OK
+"POST /runs/AO-1-r1/requests HTTP/1.1" 200 OK
+"POST /intents/operator-i1/ack HTTP/1.1" 200 OK
+"POST /tasks/AO-1/intents HTTP/1.1" 200 OK
+"GET /tasks/AO-1/intents HTTP/1.1" 200 OK
+"POST /tasks/operator/intents HTTP/1.1" 200 OK
+"POST /intents/AO-1-i1/wait HTTP/1.1" 200 OK
+"POST /intents/operator-i2/ack HTTP/1.1" 200 OK
+"POST /intents/operator-i1/ack HTTP/1.1" 200 OK
+"POST /tasks/AO-1/intents HTTP/1.1" 200 OK
+"POST /tasks/AO-1/scopes HTTP/1.1" 422 Unprocessable Entity
+"POST /tasks/AO-1/scopes HTTP/1.1" 422 Unprocessable Entity
+"POST /runs/AO-1-r1/requests HTTP/1.1" 200 OK
+"POST /runs/AO-1-r1/requests HTTP/1.1" 200 OK
+"POST /runs/AO-1-r1/requests HTTP/1.1" 200 OK
+"POST /runs/AO-1-r1/progress HTTP/1.1" 200 OK
+"POST /runs/AO-1-r1/progress HTTP/1.1" 200 OK
+"POST /runs/AO-1-r1/result HTTP/1.1" 200 OK
+"POST /runs/AO-1-r1/progress HTTP/1.1" 200 OK
+"GET /tasks/AO-1 HTTP/1.1" 200 OK
+"GET /tasks/AO-1/intents HTTP/1.1" 200 OK
+"GET /tasks/AO-1/intents HTTP/1.1" 200 OK

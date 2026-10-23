@@ -1,0 +1,279 @@
+== install ==
+-rw-r--r-- 1 sandbox sandbox 1203 Oct 14 21:58 /sandbox/codex-home/hooks.json
+
+/sandbox/.agents:
+total 12
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:58 .
+drwx------ 1 sandbox sandbox 4096 Oct 14 21:58 ..
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:58 skills
+
+/sandbox/.agents/skills:
+total 12
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:58 .
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:58 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:58 user-skill
+
+/sandbox/.agents/skills/user-skill:
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:58 .
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:58 ..
+-rw-r--r-- 1 sandbox sandbox  356 Oct 14 21:58 SKILL.md
+
+/sandbox/codex-home/agents:
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:58 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 21:58 ..
+-rw-r--r-- 1 sandbox sandbox  554 Oct 14 21:58 probe-mini.toml
+
+/sandbox/codex-home/skills:
+total 12
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:58 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 21:58 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:58 home-skill
+
+/sandbox/codex-home/skills/home-skill:
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:58 .
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:58 ..
+-rw-r--r-- 1 sandbox sandbox  354 Oct 14 21:58 SKILL.md
+
+== pre-env ==
+uid=1000 HOME=/sandbox CODEX_HOME=unset
+exec env CLAUDE_CODE_OAUTH_TOKEN entries: 0
+codex-cli 0.162.1
+== pre-fixtures ==
+/sandbox/.agents:
+total 12
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:58 .
+drwx------ 1 sandbox sandbox 4096 Oct 14 21:58 ..
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:58 skills
+
+/sandbox/.agents/skills:
+total 12
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:58 .
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:58 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:58 user-skill
+
+/sandbox/.agents/skills/user-skill:
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:58 .
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:58 ..
+-rw-r--r-- 1 sandbox sandbox  356 Oct 14 21:58 SKILL.md
+
+/sandbox/codex-home:
+total 24
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 21:58 .
+drwx------ 1 sandbox sandbox 4096 Oct 14 21:58 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:58 agents
+-rw------- 1 sandbox sandbox 3884 Oct 14 21:58 auth.json
+-rw-r--r-- 1 sandbox sandbox 1203 Oct 14 21:58 hooks.json
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:58 skills
+
+/sandbox/codex-home/agents:
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:58 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 21:58 ..
+-rw-r--r-- 1 sandbox sandbox  554 Oct 14 21:58 probe-mini.toml
+
+/sandbox/codex-home/skills:
+total 12
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:58 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 21:58 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:58 home-skill
+
+/sandbox/codex-home/skills/home-skill:
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:58 .
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:58 ..
+-rw-r--r-- 1 sandbox sandbox  354 Oct 14 21:58 SKILL.md
+== pre-codex-home ==
+755 sandbox /sandbox/codex-home
+600 sandbox /sandbox/codex-home/auth.json
+
+== early-repo ==
+dot-git is a directory (full clone)
+fa57d6b6fb35abb63c08ba1f16fe187f08dbce7c
+fa57d6b probe: codex fixtures (repository skill)
+b75f6a6 README: aos run under AOS has no --dry-run on the OpenShell route
+1447ca5 OpenShell: v2 policy, sandbox-safe Chromium flags, runner-provided database and evidence contract
+.agents/skills/repo-skill/SKILL.md
+ls: cannot access '.git/worktrees': No such file or directory
+== early-procs ==
+pid 57: bash -lc set -u
+mkdir -p /tmp/claude-home /tmp/pi-agent /tmp/pi-home /sandbox/codex-home /sandbox/incoming /sandbox/pi-sessions
+export CLAUDE_CONFIG_DIR=/tmp/claude-home PI_CODING_AGENT_DIR=/tmp/pi-agent CODEX_HOME=/sandbox/codex-home
+aos_deadline=$(( $(date +%s) + 4200 ))
+while [ ! -f /sandbox/job.tgz ]; do [ "$(date +%s)" -lt "$aos_deadline" ] || exit 1; sleep 1; done
+if [ -f /sandbox/services.env ]; then . /sandbox/services.env; fi
+mkdir -p /sandbox/repo && tar xzf /sandbox/job.tgz -C /sandbox/repo
+cd /sandbox/repo
+aos_harness() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --kill-after=30 2700 bash -c 'CODEX_HOME=/sandbox/codex-home codex exec --json --skip-git-repo-check --sandb
+  fi
+  bash -c 'CODEX_HOME=/sandbox/codex-home codex exec --json --skip-git-repo-check --sandbox danger-full-access --dangero
+  ( sleep 2700; kill -TERM "$aos_hp" 2>/dev/null; sleep 30; kill -KILL "$aos_hp" 2>/dev/null ) </dev/null >/dev/null 2>&
+  wait "$aos_hp"; aos_rc=$?; kill "$aos_wp" 2>/dev/null; return $aos_rc
+}
+date +%s%N > /sandbox/harness.started
+aos_harness </dev/null >/sandbox/harness.out 2>/sandbox/harness.err
+rc=$?; for p in $(pgrep -u "$(id -u)"); do case "$p" in 1|$$|$PPID) ;; *) kill "$p" 2>/dev/null || true;; esac; done; sl
+sleep 4200
+
+== worktree-step ==
+rc=0
+@@ stdout
+{"type":"thread.started","thread_id":"01a13c6d-fb38-7520-b5a2-9a10db85ccfb"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll verify the worktree layout with the requested single command."}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/bash -lc 'pwd; git rev-parse --show-toplevel; git worktree list'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/bash -lc 'pwd; git rev-parse --show-toplevel; git worktree list'","aggregated_output":"/sandbox/codex-home/worktrees/32cf/repo\n/sandbox/codex-home/worktrees/32cf/repo\n/sandbox/repo                            01d1235 [main]\n/sandbox/codex-home/worktrees/32cf/repo  01d1235 (detached HEAD)\n","exit_code":0,"s
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"WT-DONE"}}
+{"type":"turn.completed","usage":{"input_tokens":27046,"cached_input_tokens":19968,"cache_write_input_tokens":0,"output_tokens":116,"reasoning_output_tokens":16}}
+@@ stderr-tail
+Reading additional input from stdin...
+@@ worktrees
+/sandbox/repo                            01d1235 [main]
+/sandbox/codex-home/worktrees/32cf/repo  01d1235 (detached HEAD)
+total 12
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:00 .
+drwxr-xr-x 8 sandbox sandbox 4096 Oct 14 22:00 ..
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:00 repo
+@@ codex-home-worktrees
+/sandbox/codex-home/worktrees:
+total 12
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:00 .
+drwxr-xr-x 9 sandbox sandbox 4096 Oct 14 22:00 ..
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:00 32cf
+
+/sandbox/codex-home/worktrees/32cf:
+total 12
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:00 .
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:00 ..
+drwxr-xr-x 7 sandbox sandbox 4096 Oct 14 22:00 repo
+
+/sandbox/codex-home/worktrees/32cf/repo:
+total 172
+drwxr-xr-x 7 sandbox sandbox  4096 Oct 14 22:00 .
+drwxr-xr-x 3 sandbox sandbox  4096 Oct 14 22:00 ..
+drwxr-xr-x 3 sandbox sandbox  4096 Oct 14 22:00 .agents
+drwxr-xr-x 3 sandbox sandbox  4096 Oct 14 22:00 .claude
+-rw-r--r-- 1 sandbox sandbox    42 Oct 14 22:00 .git
+-rw-r--r-- 1 sandbox sandbox    57 Oct 14 22:00 .gitignore
+-rw-r--r-- 1 sandbox sandbox     5 Oct 14 22:00 .python-version
+-rw-r--r-- 1 sandbox sandbox  1037 Oct 14 22:00 AGENTS.md
+-rw-r--r-- 1 sandbox sandbox    11 Oct 14 22:00 CLAUDE.md
+-rw-r--r-- 1 sandbox sandbox 11358 Oct 14 22:00 LICENSE
+-rw-r--r-- 1 sandbox sandbox  7625 Oct 14 22:00 README.md
+-rw-r--r-- 1 sandbox sandbox   327 Oct 14 22:00 aos-policy.toml
+-rw-r--r-- 1 sandbox sandbox   588 Oct 14 22:00 compose.yaml
+drwxr-xr-x 3 sandbox sandbox  4096 Oct 14 22:00 notes
+-rw-r--r-- 1 sandbox sandbox  7189 Oct 14 22:00 probe-report.md
+-rw-r--r-- 1 sandbox sandbox   569 Oct 14 22:00 pyproject.toml
+
+== subagent-files ==
+-- /sandbox/sub-mini.txt
+gpt-5.6-terra
+-- /sandbox/sub-mini-curl.txt
+7
+==> /tmp/sub-mini-curl-output <==
+-- /sandbox/sub-mini-env.txt
+0
+-- /sandbox/sub-default.txt
+gpt-6
+-- /sandbox/sub-default-curl.txt
+7
+curl: (7) Failed to connect to example.com port 443 after 2 ms: Couldn't connect to server
+-- /sandbox/sub-default-env.txt
+0
+== firelog ==
+HOME=/sandbox
+total 40
+drwxr-xr-x 2 sandbox sandbox  4096 Oct 14 21:59 .
+drwxr-xr-x 3 sandbox sandbox  4096 Oct 14 21:58 ..
+-rw-r--r-- 1 sandbox sandbox 29932 Oct 14 22:00 fires.jsonl
+-rw-r--r-- 1 sandbox sandbox     0 Oct 14 21:59 stop-blocked-once
+-- /sandbox/.local/share/codex-probe/fires.jsonl lines=51
+{"t": 1792015107.535, "event": "SessionStart", "tool_name": null, "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": null, "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "source", "transcript_path"], "boundary": {"home": "/sandbox", "cwd": "/sandbox/repo", "uid": 1000, "token_entries": 0, "codex_env_keys": ["CODEX_HOME", "CODEX_MANAGED_BY_NPM", "CODEX_MANAGED_PACKAGE_ROOT"], "curl_rc": 7, "curl_err": "curl: (7) Failed to connect to example.com port 443 after 6 ms: Couldn't connect to server", "usr_write": "errno 13 Permission denied", "state_write": "ok /sandbox/.local/state/codex-probe"}}
+{"t": 1792015107.689, "event": "UserPromptSubmit", "tool_name": null, "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": null, "keys": ["cwd", "hook_event_name", "model", "permission_mode", "prompt", "session_id", "transcript_path", "turn_id"]}
+{"t": 1792015113.065, "event": "PreToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cat /sandbox/.agents/skills/user-skill/SKILL.md /sandbox/codex-home/skills/home-skill/SKILL.md /sandbox/repo/.agents/skills/repo-skill/SKILL.md\"}", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015113.16, "event": "PostToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cat /sandbox/.agents/skills/user-skill/SKILL.md /sandbox/codex-home/skills/home-skill/SKILL.md /sandbox/repo/.agents/skills/repo-skill/SKILL.md\"}", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015119.345, "event": "PreToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cat >> /sandbox/repo/probe-report.md <<'EOF'\\n## K1\\nuser-skill: Code phrase: PHRASE-USER-09150e\\nhome-skill: Code phrase: PHRASE-HOME-0df55d\\nrepo-skill: Code phrase: PHRASE-REPO-4fb6f0\\", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015119.403, "event": "PostToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cat >> /sandbox/repo/probe-report.md <<'EOF'\\n## K1\\nuser-skill: Code phrase: PHRASE-USER-09150e\\nhome-skill: Code phrase: PHRASE-HOME-0df55d\\nrepo-skill: Code phrase: PHRASE-REPO-4fb6f0\\", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015119.442, "event": "PreToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cd /sandbox/repo && { echo '## K2a'; echo '@@ allowed'; echo HOOK-ALLOWED-OK; } 2>&1 | tee -a probe-report.md\"}", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015119.506, "event": "PostToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cd /sandbox/repo && { echo '## K2a'; echo '@@ allowed'; echo HOOK-ALLOWED-OK; } 2>&1 | tee -a probe-report.md\"}", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015122.726, "event": "PreToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cd /sandbox/repo && { echo '## K2b'; echo '@@ deny'; echo HOOK-DENY-ME; } 2>&1 | tee -a probe-report.md\"}", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"], "decision": "deny"}
+{"t": 1792015128.307, "event": "PreToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cat >> /sandbox/repo/probe-report.md <<'EOF'\\n## K2b\\nCommand blocked by PreToolUse hook: [codex-probe] denied by the probe hook (HOOK-DENY-ME). Command: cd /sandbox/repo && { echo '## K2", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"], "decision": "deny"}
+{"t": 1792015134.587, "event": "PreToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cd /sandbox/repo && { echo '## K2c'; echo '@@ firelog'; cat \\\"$HOME/.local/share/codex-probe/fires.jsonl\\\" 2>&1 | cut -c1-200; echo \\\"rc=$?\\\"; } 2>&1 | tee -a probe-report.md\"}", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015134.653, "event": "PostToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cd /sandbox/repo && { echo '## K2c'; echo '@@ firelog'; cat \\\"$HOME/.local/share/codex-probe/fires.jsonl\\\" 2>&1 | cut -c1-200; echo \\\"rc=$?\\\"; } 2>&1 | tee -a probe-report.md\"}", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015134.676, "event": "PreToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cd /sandbox/repo && H=$(git rev-parse HEAD) && { echo '## K3'; echo '@@ worktrees-before'; ls -la .git/worktrees 2>&1; echo '@@ wt-add-tmp'; git worktree add --detach /tmp/cx-wt-1 $H 2>&1", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015134.797, "event": "PostToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cd /sandbox/repo && H=$(git rev-parse HEAD) && { echo '## K3'; echo '@@ worktrees-before'; ls -la .git/worktrees 2>&1; echo '@@ wt-add-tmp'; git worktree add --detach /tmp/cx-wt-1 $H 2>&1", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015141.535, "event": "PreToolUse", "tool_name": "collaborationspawn_agent", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"task_name\": \"probe_mini\", \"agent_type\": \"probe-mini\", \"fork_turns\": \"none\", \"message\": \"gAAAAABqz_slTf4MZ4gFaRgQLqkx51XI-iwYvOSzNxWWwYidb21JnOq1i1GSbkDBJ9S-iUYWF-jKs4Gjn4X64FfSfrNlfxc39b8dYpdeWoLRYX", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015141.655, "event": "PostToolUse", "tool_name": "collaborationspawn_agent", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"task_name\": \"probe_mini\", \"agent_type\": \"probe-mini\", \"fork_turns\": \"none\", \"message\": \"gAAAAABqz_slTf4MZ4gFaRgQLqkx51XI-iwYvOSzNxWWwYidb21JnOq1i1GSbkDBJ9S-iUYWF-jKs4Gjn4X64FfSfrNlfxc39b8dYpdeWoLRYX", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015142.758, "event": "SubagentStart", "tool_name": null, "model": "gpt-5.6-terra", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": "01a13c6d-0aa6-7420-9599-1c3b3a6f260e", "agent_type": "probe-mini", "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": null, "keys": ["agent_id", "agent_type", "cwd", "hook_event_name", "model", "permission_mode", "session_id", "transcript_path", "turn_id"]}
+{"t": 1792015145.285, "event": "PreToolUse", "tool_name": "collaborationwait_agent", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"timeout_ms\": 10000}", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015147.626, "event": "PreToolUse", "tool_name": "Bash", "model": "gpt-5.6-terra", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": "01a13c6d-0aa6-7420-9599-1c3b3a6f260e", "agent_type": "probe-mini", "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"printf '%s\\\\n' 'gpt-5.6-terra' > /sandbox/sub-mini.txt\"}", "keys": ["agent_id", "agent_type", "cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015147.712, "event": "PostToolUse", "tool_name": "Bash", "model": "gpt-5.6-terra", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": "01a13c6d-0aa6-7420-9599-1c3b3a6f260e", "agent_type": "probe-mini", "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"printf '%s\\\\n' 'gpt-5.6-terra' > /sandbox/sub-mini.txt\"}", "keys": ["agent_id", "agent_type", "cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015151.051, "event": "PreToolUse", "tool_name": "Bash", "model": "gpt-5.6-terra", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": "01a13c6d-0aa6-7420-9599-1c3b3a6f260e", "agent_type": "probe-mini", "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"curl -sS --max-time 10 https://example.com > /tmp/sub-mini-curl-output 2> /tmp/sub-mini-curl-error; curl_status=$?; { printf '%s\\\\n' \\\"$curl_status\\\"; head -n 1 /tmp/sub-mini-curl-output ", "keys": ["agent_id", "agent_type", "cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015151.357, "event": "PostToolUse", "tool_name": "Bash", "model": "gpt-5.6-terra", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": "01a13c6d-0aa6-7420-9599-1c3b3a6f260e", "agent_type": "probe-mini", "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"curl -sS --max-time 10 https://example.com > /tmp/sub-mini-curl-output 2> /tmp/sub-mini-curl-error; curl_status=$?; { printf '%s\\\\n' \\\"$curl_status\\\"; head -n 1 /tmp/sub-mini-curl-output ", "keys": ["agent_id", "agent_type", "cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015153.723, "event": "PreToolUse", "tool_name": "Bash", "model": "gpt-5.6-terra", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": "01a13c6d-0aa6-7420-9599-1c3b3a6f260e", "agent_type": "probe-mini", "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"env | grep -c CLAUDE_CODE_OAUTH_TOKEN > /sandbox/sub-mini-env.txt\"}", "keys": ["agent_id", "agent_type", "cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015153.784, "event": "PostToolUse", "tool_name": "Bash", "model": "gpt-5.6-terra", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": "01a13c6d-0aa6-7420-9599-1c3b3a6f260e", "agent_type": "probe-mini", "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"env | grep -c CLAUDE_CODE_OAUTH_TOKEN > /sandbox/sub-mini-env.txt\"}", "keys": ["agent_id", "agent_type", "cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015155.335, "event": "PostToolUse", "tool_name": "collaborationwait_agent", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"timeout_ms\": 10000}", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015155.987, "event": "SubagentStop", "tool_name": null, "model": "gpt-5.6-terra", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": "01a13c6d-0aa6-7420-9599-1c3b3a6f260e", "agent_type": "probe-mini", "stop_hook_active": false, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": null, "keys": ["agent_id", "agent_transcript_path", "agent_type", "cwd", "hook_event_name", "last_assistant_message", "model", "permission_mode", "session_id", "stop_hook_active", "transcript_path", "turn_id"]}
+{"t": 1792015157.671, "event": "PreToolUse", "tool_name": "collaborationwait_agent", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"timeout_ms\": 10000}", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015157.745, "event": "PostToolUse", "tool_name": "collaborationwait_agent", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"timeout_ms\": 10000}", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015164.334, "event": "PreToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cat >> /sandbox/repo/probe-report.md <<'EOF'\\n## K4 (i)\\nNO-CODEWORD  \\nModel id: gpt-5.6-terra\\nspawn-args: {\\\"task_name\\\":\\\"probe_mini\\\",\\\"agent_type\\\":\\\"probe-mini\\\",\\\"fork_turns\\\":\\\"n", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015164.402, "event": "PostToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cat >> /sandbox/repo/probe-report.md <<'EOF'\\n## K4 (i)\\nNO-CODEWORD  \\nModel id: gpt-5.6-terra\\nspawn-args: {\\\"task_name\\\":\\\"probe_mini\\\",\\\"agent_type\\\":\\\"probe-mini\\\",\\\"fork_turns\\\":\\\"n", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015169.659, "event": "PreToolUse", "tool_name": "collaborationspawn_agent", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"task_name\": \"probe_default\", \"fork_turns\": \"none\", \"message\": \"gAAAAABqz_tBn67fhjUlm1yEwlCppuyWJxiVJGhgV1rOm4WC1WKLaNAJ8eY9e6f-cx7e4hAQQ_N-BYgL5PXB_tECXwRqlAX3i9OKIge5CEVYbNayBKbryTINXSuzfWq3QMSogwS", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015169.725, "event": "PostToolUse", "tool_name": "collaborationspawn_agent", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"task_name\": \"probe_default\", \"fork_turns\": \"none\", \"message\": \"gAAAAABqz_tBn67fhjUlm1yEwlCppuyWJxiVJGhgV1rOm4WC1WKLaNAJ8eY9e6f-cx7e4hAQQ_N-BYgL5PXB_tECXwRqlAX3i9OKIge5CEVYbNayBKbryTINXSuzfWq3QMSogwS", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015170.599, "event": "SubagentStart", "tool_name": null, "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": "01a13c6d-787e-75c0-a0d0-5d7d8791bfb3", "agent_type": "default", "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": null, "keys": ["agent_id", "agent_type", "cwd", "hook_event_name", "model", "permission_mode", "session_id", "transcript_path", "turn_id"]}
+{"t": 1792015174.279, "event": "PreToolUse", "tool_name": "collaborationwait_agent", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"timeout_ms\": 10000}", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015174.467, "event": "PreToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": "01a13c6d-787e-75c0-a0d0-5d7d8791bfb3", "agent_type": "default", "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"printf '%s\\\\n' 'gpt-6' > /sandbox/sub-default.txt\"}", "keys": ["agent_id", "agent_type", "cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015174.543, "event": "PostToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": "01a13c6d-787e-75c0-a0d0-5d7d8791bfb3", "agent_type": "default", "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"printf '%s\\\\n' 'gpt-6' > /sandbox/sub-default.txt\"}", "keys": ["agent_id", "agent_type", "cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015177.677, "event": "PreToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": "01a13c6d-787e-75c0-a0d0-5d7d8791bfb3", "agent_type": "default", "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"curl -sS --max-time 10 https://example.com > /sandbox/sub-default-curl-output.tmp 2>&1\\ncurl_status=$?\\n{ printf '%s\\\\n' \\\"$curl_status\\\"; head -n 1 /sandbox/sub-default-curl-output.tmp; ", "keys": ["agent_id", "agent_type", "cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015177.754, "event": "PostToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": "01a13c6d-787e-75c0-a0d0-5d7d8791bfb3", "agent_type": "default", "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"curl -sS --max-time 10 https://example.com > /sandbox/sub-default-curl-output.tmp 2>&1\\ncurl_status=$?\\n{ printf '%s\\\\n' \\\"$curl_status\\\"; head -n 1 /sandbox/sub-default-curl-output.tmp; ", "keys": ["agent_id", "agent_type", "cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015179.886, "event": "PreToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": "01a13c6d-787e-75c0-a0d0-5d7d8791bfb3", "agent_type": "default", "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"env | grep -c CLAUDE_CODE_OAUTH_TOKEN > /sandbox/sub-default-env.txt\"}", "keys": ["agent_id", "agent_type", "cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015179.943, "event": "PostToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": "01a13c6d-787e-75c0-a0d0-5d7d8791bfb3", "agent_type": "default", "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"env | grep -c CLAUDE_CODE_OAUTH_TOKEN > /sandbox/sub-default-env.txt\"}", "keys": ["agent_id", "agent_type", "cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015181.758, "event": "SubagentStop", "tool_name": null, "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": "01a13c6d-787e-75c0-a0d0-5d7d8791bfb3", "agent_type": "default", "stop_hook_active": false, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": null, "keys": ["agent_id", "agent_transcript_path", "agent_type", "cwd", "hook_event_name", "last_assistant_message", "model", "permission_mode", "session_id", "stop_hook_active", "transcript_path", "turn_id"]}
+{"t": 1792015181.785, "event": "PostToolUse", "tool_name": "collaborationwait_agent", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"timeout_ms\": 10000}", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015191.53, "event": "PreToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cat >> /sandbox/repo/probe-report.md <<'EOF'\\n## K4 (ii)\\nNO-CODEWORD\\n\\nModel id written: gpt-6.\\nspawn-args: {\\\"task_name\\\":\\\"probe_default\\\",\\\"fork_turns\\\":\\\"none\\\",\\\"message\\\":\\\"Mecha", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015191.605, "event": "PostToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cat >> /sandbox/repo/probe-report.md <<'EOF'\\n## K4 (ii)\\nNO-CODEWORD\\n\\nModel id written: gpt-6.\\nspawn-args: {\\\"task_name\\\":\\\"probe_default\\\",\\\"fork_turns\\\":\\\"none\\\",\\\"message\\\":\\\"Mecha", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015191.63, "event": "PreToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cd /sandbox/repo && { echo '## K5'; echo '@@ env-count'; env | grep -c CLAUDE_CODE_OAUTH_TOKEN; echo '@@ printenv-prefix'; printenv CLAUDE_CODE_OAUTH_TOKEN | cut -c1-12; echo '@@ home'; e", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015191.741, "event": "PostToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cd /sandbox/repo && { echo '## K5'; echo '@@ env-count'; env | grep -c CLAUDE_CODE_OAUTH_TOKEN; echo '@@ printenv-prefix'; printenv CLAUDE_CODE_OAUTH_TOKEN | cut -c1-12; echo '@@ home'; e", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015194.927, "event": "PreToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cd /sandbox/repo && git add probe-report.md && git -c user.name=codex-probe -c user.email=probe@sandbox.invalid commit -q -m \\\"probe: codex mechanism report\\\" && git log --oneline -1\"}", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015194.994, "event": "PostToolUse", "tool_name": "Bash", "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": "{\"command\": \"cd /sandbox/repo && git add probe-report.md && git -c user.name=codex-probe -c user.email=probe@sandbox.invalid commit -q -m \\\"probe: codex mechanism report\\\" && git log --oneline -1\"}", "keys": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"]}
+{"t": 1792015197.425, "event": "Stop", "tool_name": null, "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": false, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": null, "keys": ["cwd", "hook_event_name", "last_assistant_message", "model", "permission_mode", "session_id", "stop_hook_active", "transcript_path", "turn_id"], "decision": "block-once"}
+{"t": 1792015200.634, "event": "Stop", "tool_name": null, "model": "gpt-6.1-sol", "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": true, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": null, "keys": ["cwd", "hook_event_name", "last_assistant_message", "model", "permission_mode", "session_id", "stop_hook_active", "transcript_path", "turn_id"]}
+{"t": 1792015200.699, "event": "SessionEnd", "tool_name": null, "model": null, "session_id": "01a13c6c-792a-7ef0-8421-cf713be1bf7c", "agent_id": null, "agent_type": null, "stop_hook_active": null, "argv0": "/sandbox/plugins/codex-probe/hook.py", "input_head": null, "keys": ["cwd", "hook_event_name", "reason", "session_id", "transcript_path"]}
+== state ==
+/sandbox/.local/state:
+total 12
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:58 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 21:58 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:59 codex-probe
+
+/sandbox/.local/state/codex-probe:
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:59 .
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:58 ..
+-rw-r--r-- 1 sandbox sandbox    3 Oct 14 21:58 mark
+-rw-r--r-- 1 sandbox sandbox    0 Oct 14 21:59 mark-shell
+== worktrees ==
+total 12
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:00 .
+drwxr-xr-x 8 sandbox sandbox 4096 Oct 14 22:00 ..
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:00 repo
+/sandbox/repo                            01d1235 [main]
+/sandbox/codex-home/worktrees/32cf/repo  01d1235 (detached HEAD)
+== usr-paths ==
+ls: cannot access '/usr/local/cx-wt': No such file or directory
+ls: cannot access '/usr/cx-mark': No such file or directory
+ls: cannot access '/usr/codex-probe-mark': No such file or directory
+bash: line 37: warning: here-document at line 6 delimited by end-of-file (wanted `PY')
+bash: -c: line 38: syntax error: unexpected end of file
+
+== in-sandbox-scan ==
+files under /sandbox holding a codex token: {'id_token': 0, 'access_token': 0, 'refresh_token': 0}; control 'aos-policy': 4
+files under /tmp holding a codex token: {'id_token': 0, 'access_token': 0, 'refresh_token': 0}; control 'codex': 1
+files under /home/sandbox holding a codex token: {'id_token': 0, 'access_token': 0, 'refresh_token': 0}; control 'PS1': 1
+codex tokens in the decompressed git objects: {'id_token': 0, 'access_token': 0, 'refresh_token': 0}; control 'codex fixtures': 2

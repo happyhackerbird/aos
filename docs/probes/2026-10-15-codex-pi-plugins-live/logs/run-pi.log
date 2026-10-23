@@ -1,0 +1,3 @@
+note: pi is not on this host; capabilities are checked inside the sandbox
+claimed AO-2-r1
+result failed: no commits

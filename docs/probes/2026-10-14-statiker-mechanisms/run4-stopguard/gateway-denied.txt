@@ -1,0 +1,5 @@
+# stopguard: gateway log lines with DENIED, grouped (sandbox id removed, 198.18.0.x placeholders folded)
+# total DENIED lines: 0; full log lines: 292
+
+# NET:OPEN / HTTP ALLOWED destinations, counted
+   3  api.anthropic.com:443

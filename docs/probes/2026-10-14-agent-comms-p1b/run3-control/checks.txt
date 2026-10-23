@@ -1,0 +1,113 @@
+mode: "control"
+name: "p1b-control"
+task_id: "AO-4"
+run_id: "AO-4-r1"
+code_words: ["MANGO-5b410f", "KIWI-d89f69"]
+harness_rc: "0"
+effective_policy_problems: []
+gateway_net_lines: 72
+
+== q1 (sandbox exec, rc=0) ==
+mode=755 uid=0 path=/usr/local/bin/aos-agent
+uid=1000 shell=bash
+{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"aos","version":"1"}}}
+mcp_rc=0
+
+== q2 (sandbox exec, rc=0) ==
+{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"aos","version":"1"}}}
+{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"inbox empty"}],"isError":false}}
+mcp_rc=0
+getent host.docker.internal: rc=2
+getent host.openshell.internal: rc=2
+http://192.168.5.2:8012/health: rc=0 http=200
+http://host.docker.internal:8012/health: rc=6 http=000
+http://192.168.5.2:8010/health: rc=7 http=000
+http://192.168.5.2:8011/health: rc=7 http=000
+https://example.com/: rc=7 http=000
+
+== q6_sandbox (sandbox exec, rc=0) ==
+token_in_repo_tree_files=0
+control_in_repo_tree_files=2
+token_in_git_objects_lines=0
+control_in_git_objects_lines=1
+token_in_harness_out_lines=0
+token_in_harness_err_lines=0
+codeword_MANGO-5b410f_in_harness_out_lines=3
+codeword_KIWI-d89f69_in_harness_out_lines=0
+token_in_ledger_lines=0
+runid_in_ledger_lines=0
+ledger_lines=2
+token_in_claude_home_files=0
+claude_home_files=7
+runfile_mode=600
+
+== q6 downloads (host-side counts) ==
+{
+ "harness.err": {
+  "token_lines": 0,
+  "bytes": 0,
+  "MANGO-5b410f_lines": 0,
+  "KIWI-d89f69_lines": 0
+ },
+ "harness.out": {
+  "token_lines": 0,
+  "bytes": 19147,
+  "MANGO-5b410f_lines": 3,
+  "KIWI-d89f69_lines": 0
+ },
+ "harness.rc": {
+  "token_lines": 0,
+  "bytes": 2,
+  "MANGO-5b410f_lines": 0,
+  "KIWI-d89f69_lines": 0
+ }
+}
+
+== gateway log: lines naming the bus port ==
+NET:OPEN [INFO] ALLOWED /usr/bin/python3.11(0) -> 192.168.5.2:8012 [policy:aos-services engine:opa]
+HTTP:POST [INFO] ALLOWED POST http://192.168.5.2:8012/runs/AO-4-r1/requests
+NET:OPEN [INFO] ALLOWED /usr/bin/curl(0) -> 192.168.5.2:8012 [policy:aos-services engine:opa]
+HTTP:GET [INFO] ALLOWED GET http://192.168.5.2:8012/health
+NET:OPEN [INFO] ALLOWED /usr/bin/python3.11(0) -> 192.168.5.2:8012 [policy:aos-services engine:opa]
+HTTP:POST [INFO] ALLOWED POST http://192.168.5.2:8012/tasks/AO-4/intents
+NET:OPEN [INFO] ALLOWED /usr/bin/python3.11(0) -> 192.168.5.2:8012 [policy:aos-services engine:opa]
+HTTP:POST [INFO] ALLOWED POST http://192.168.5.2:8012/intents/AO-4-i1/wait
+NET:OPEN [INFO] ALLOWED /usr/bin/python3.11(0) -> 192.168.5.2:8012 [policy:aos-services engine:opa]
+HTTP:POST [INFO] ALLOWED POST http://192.168.5.2:8012/intents/operator-i5/ack
+NET:OPEN [INFO] ALLOWED /usr/bin/python3.11(0) -> 192.168.5.2:8012 [policy:aos-services engine:opa]
+HTTP:POST [INFO] ALLOWED POST http://192.168.5.2:8012/runs/AO-4-r1/requests
+NET:OPEN [INFO] ALLOWED /usr/bin/python3.11(0) -> 192.168.5.2:8012 [policy:aos-services engine:opa]
+HTTP:POST [INFO] ALLOWED POST http://192.168.5.2:8012/intents/operator-i4/ack
+
+== gateway log: DENIED lines ==
+NET:REFUSE [MED] DENIED host.docker.internal [reason:policy_dns_trusted_gateway_unavailable]
+NET:REFUSE [MED] DENIED host.docker.internal [reason:policy_dns_trusted_gateway_unavailable]
+NET:REFUSE [MED] DENIED host.openshell.internal [reason:policy_dns_trusted_gateway_unavailable]
+NET:REFUSE [MED] DENIED host.openshell.internal [reason:policy_dns_trusted_gateway_unavailable]
+NET:REFUSE [MED] DENIED host.docker.internal [reason:policy_dns_trusted_gateway_unavailable]
+NET:OPEN [MED] DENIED /usr/bin/curl(0) -> 192.168.5.2:8010 [reason:transparent_tcp_policy_denied]
+NET:OPEN [MED] DENIED /usr/bin/curl(0) -> 192.168.5.2:8011 [reason:transparent_tcp_policy_denied]
+NET:REFUSE [MED] DENIED example.com [reason:policy_dns_ineligible]
+NET:OPEN [MED] DENIED /usr/bin/curl(0) -> example.com:443 [reason:transparent_tcp_policy_denied]
+NET:OPEN [MED] DENIED /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe(0) -> 198.18.0.3:443 [reason:transparent_tcp_mapping_denied]
+NET:OPEN [MED] DENIED /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe(0) -> 198.18.0.3:443 [reason:transparent_tcp_mapping_denied]
+
+== timeline ==
+{"t": 1791998824.0, "event": "bus.run_started", "task_id": "AO-4", "run_id": "AO-4-r1"}
+{"t": 1791998825.911, "event": "sandbox.created", "name": "p1b-control", "image": "aos-harness:comms"}
+{"t": 1791998826.119, "event": "policy.effective", "problems": []}
+{"t": 1791998826.321, "event": "q1.done", "rc": 0}
+{"t": 1791998826.688, "event": "s2.run_file_uploaded"}
+{"t": 1791998827.02, "event": "q2.done", "rc": 0}
+{"t": 1791998827.873, "event": "s3_s4_s6.uploaded"}
+{"t": 1791998828.233, "event": "job.released"}
+{"t": 1791998837.121, "event": "operator.ask_seen", "id": "AO-4-i1", "state": "stored", "body": "P1b: which fruit should the final line name?"}
+{"t": 1791998837.127, "event": "operator.m1_sent", "id": "operator-i4", "state": "stored"}
+{"t": 1791998837.132, "event": "operator.reply_sent", "id": "operator-i5", "reply_to": "AO-4-i1"}
+{"t": 1791998854.596, "event": "operator.m1_acknowledged", "state": "acknowledged"}
+{"t": 1791998854.603, "event": "operator.m2_sent", "id": "operator-i6", "state": "stored"}
+{"t": 1791998857.843, "event": "harness.finished", "seconds": 3.2}
+{"t": 1791998858.131, "event": "q6.sandbox_scan_done", "rc": 0}
+{"t": 1791998859.377, "event": "q6.downloads_scanned", "hits": {"harness.err": {"token_lines": 0, "bytes": 0, "MANGO-5b410f_lines": 0, "KIWI-d89f69_lines": 0}, "harness.out": {"token_lines": 0, "bytes": 19147, "MANGO-5b410f_lines": 3, "KIWI-d89f69_lines": 0}, "harness.rc": {"token_lines": 0, "bytes": 2, "MANGO-5b410f_lines": 0, "KIWI-d89f69_lines": 0}}}
+{"t": 1791998859.438, "event": "gateway.log_saved", "net_lines": 72}
+{"t": 1791998859.766, "event": "sandbox.deleted", "gone": true}

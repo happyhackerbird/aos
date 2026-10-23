@@ -1,0 +1,13 @@
+{
+  "description": "codex-probe: every supported event logs to ~/.local/share/codex-probe/fires.jsonl; PreToolUse denies HOOK-DENY-ME; Stop blocks once",
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "python3 /sandbox/plugins/codex-probe/hook.py", "timeout": 30}]}],
+    "SessionEnd": [{"hooks": [{"type": "command", "command": "python3 /sandbox/plugins/codex-probe/hook.py", "timeout": 1}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "python3 /sandbox/plugins/codex-probe/hook.py", "timeout": 10}]}],
+    "PreToolUse": [{"hooks": [{"type": "command", "command": "python3 /sandbox/plugins/codex-probe/hook.py", "timeout": 10}]}],
+    "PostToolUse": [{"hooks": [{"type": "command", "command": "python3 /sandbox/plugins/codex-probe/hook.py", "timeout": 10}]}],
+    "SubagentStart": [{"hooks": [{"type": "command", "command": "python3 /sandbox/plugins/codex-probe/hook.py", "timeout": 10}]}],
+    "SubagentStop": [{"hooks": [{"type": "command", "command": "python3 /sandbox/plugins/codex-probe/hook.py", "timeout": 10}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "python3 /sandbox/plugins/codex-probe/hook.py", "timeout": 10}]}]
+  }
+}

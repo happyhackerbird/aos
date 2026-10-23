@@ -1,0 +1,3 @@
+task:
+  isolation:
+    enabled: true

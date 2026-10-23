@@ -1,0 +1,28 @@
+{
+  "base_commit": "b75f6a67d980c7c21aa3184dcb21dae2fd2d5abe",
+  "stop_guard_on_host": {
+    "rc": 0,
+    "stdout": "{\"decision\": \"block\", \"reason\": \"P16 stop-guard: unattended statiker desk work is owed at `<job>/.clippy/runs/2026-10-14-probe-statiker.md` (last A-line [BIT]; no PENDING blocking). A report is no terminus \\u2014 the run's own turn-end rule (SKILL.md) names a dispatched round awaiting return, a hold the desk cannot clear, an operator-owned decision, or the close as the only legitimate stops; none applies here. Continue the owed desk work (cycle re-derivation, unit dispatch, or landing) per the tracker's current state before ending this turn.\"}\n",
+    "stderr": ""
+  },
+  "fixture_commit": "f87d33fbc663ef64daa26ce574e3cb5609dafe05",
+  "committed": [
+    ".clippy/runs/2026-10-05-repo-policy-step1d.md",
+    ".clippy/runs/2026-10-14-probe-statiker.md"
+  ],
+  "status": "",
+  "tarball": {
+    "path": "$S/job.tgz",
+    "bytes": 335967,
+    "sha256": "d3e2c34b868c5c0f8473d1913b2fb07b811c5c1b956debebb45b37e679488e91"
+  },
+  "plugins": {
+    "path": "$S/plugins.tgz",
+    "bytes": 313574,
+    "sha256": "9f12bf67a26cb98b1c34b02848cc3f93c4e60a4b4c569944f667718ae03cbcf2",
+    "members": 78,
+    "statiker_version": "0.2.104",
+    "dispatch_guards_version": "0.11.28",
+    "pycache_members": 2
+  }
+}

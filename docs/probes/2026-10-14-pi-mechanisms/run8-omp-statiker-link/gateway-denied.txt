@@ -1,0 +1,30 @@
+gateway log lines: 361; DENIED lines: 18; ALLOWED lines: 12
+
+DENIED (count, line):
+     1  [OCSF ] [ocsf] NET:REFUSE [MED] DENIED example.com [reason:policy_dns_ineligible]
+     1  [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/local/bin/omp(0) -> example.com:443 [reason:transparent_tcp_policy_denied]
+     1  [OCSF ] [ocsf] NET:REFUSE [MED] DENIED hyper.charm.land [reason:policy_dns_ineligible]
+     1  [OCSF ] [ocsf] NET:REFUSE [MED] DENIED catalog.stencil.so [reason:policy_dns_ineligible]
+     1  [OCSF ] [ocsf] NET:REFUSE [MED] DENIED coding-intl.dashscope.aliyuncs.com [reason:policy_dns_ineligible]
+     1  [OCSF ] [ocsf] NET:REFUSE [MED] DENIED api.commandcode.ai [reason:policy_dns_ineligible]
+     1  [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/local/bin/omp(0) -> catalog.stencil.so:443 [reason:transparent_tcp_policy_denied]
+     1  [OCSF ] [ocsf] NET:REFUSE [MED] DENIED api.kilo.ai [reason:policy_dns_ineligible]
+     1  [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/local/bin/omp(0) -> api.commandcode.ai:443 [reason:transparent_tcp_policy_denied]
+     1  [OCSF ] [ocsf] NET:REFUSE [MED] DENIED zenmux.ai [reason:policy_dns_ineligible]
+     1  [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/local/bin/omp(0) -> coding-intl.dashscope.aliyuncs.com:443 [reason:transparent_tcp_policy_denied]
+     1  [OCSF ] [ocsf] NET:REFUSE [MED] DENIED api.venice.ai [reason:policy_dns_ineligible]
+     1  [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/local/bin/omp(0) -> hyper.charm.land:443 [reason:transparent_tcp_policy_denied]
+     1  [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/local/bin/omp(0) -> api.venice.ai:443 [reason:transparent_tcp_policy_denied]
+     1  [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/local/bin/omp(0) -> zenmux.ai:443 [reason:transparent_tcp_policy_denied]
+     1  [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/local/bin/omp(0) -> api.kilo.ai:443 [reason:transparent_tcp_policy_denied]
+     1  [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/local/bin/omp(0) -> 198.18.0.2:443 [reason:transparent_tcp_mapping_denied]
+     1  [OCSF ] [ocsf] NET:REFUSE [MED] DENIED 79c51129e227 [reason:policy_dns_ineligible]
+
+ALLOWED destinations (count, target):
+     5  chatgpt.com:443
+     2  POST http://chatgpt.com:443/backend-api/codex/responses
+     1  GET http://chatgpt.com:443/backend-api/wham/usage
+     1  GET http://chatgpt.com:443/backend-api/accounts/verified_access
+     1  GET http://chatgpt.com:443/backend-api/codex/models
+     1  GET http://chatgpt.com:443/backend-api/codex/responses
+     1  GET http://chatgpt.com:443/backend-api/wham/rate-limit-reset-credits

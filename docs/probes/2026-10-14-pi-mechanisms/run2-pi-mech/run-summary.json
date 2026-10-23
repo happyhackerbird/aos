@@ -1,0 +1,90 @@
+{
+  "name": "pim-pi-mech",
+  "flavour": "pi",
+  "mode": "mech",
+  "model": "gpt-6-luna",
+  "phrases": {
+    "probe-skill": "PHRASE-PROBE-ae5b5b",
+    "probe-skill-home": "PHRASE-HOME-09023b",
+    "repo-skill": "PHRASE-REPO-70e86d"
+  },
+  "auth": "PiAuth(expires_ms=1792687336000, expiry_source='jwt')",
+  "codeword": "CODEWORD-466847",
+  "session_id": "99172165-fdd4-4069-a153-b99005a164c7",
+  "command": "PI_CODING_AGENT_DIR=/tmp/pi-agent pi --print --mode json --provider openai-codex --model gpt-6-luna --session-id 99172165-fdd4-4069-a153-b99005a164c7 --session-dir /sandbox/pi-sessions --no-extensions --no-skills --no-prompt-templates --no-mcp --no-approve --no-context-files --no-themes --offline -e /sandbox/plugins/pi-probe/index.ts -e /sandbox/plugins/pi-npm/node_modules/pi-subagents -e /sandbox/plugins/pi-dispatch-guards --skill /sandbox/plugins/pi-probe/skills/probe-skill",
+  "effective_policy_problems": [],
+  "harness_seconds": 40.7,
+  "gateway_denied_lines": 3,
+  "harness_rc": "0",
+  "timeline": [
+    {
+      "t": 1792016351.808,
+      "event": "sandbox.created",
+      "name": "pim-pi-mech",
+      "image": "aos-harness:comms"
+    },
+    {
+      "t": 1792016351.913,
+      "event": "policy.effective",
+      "problems": []
+    },
+    {
+      "t": 1792016353.225,
+      "event": "pi_npm.uploaded",
+      "bytes": 9233169,
+      "parts": 2
+    },
+    {
+      "t": 1792016353.941,
+      "event": "fixtures.installed"
+    },
+    {
+      "t": 1792016354.349,
+      "event": "pi_auth.uploaded",
+      "path": "/tmp/pi-agent/auth.json"
+    },
+    {
+      "t": 1792016354.681,
+      "event": "prompt.uploaded"
+    },
+    {
+      "t": 1792016356.591,
+      "event": "job.released",
+      "bytes": 220025
+    },
+    {
+      "t": 1792016359.214,
+      "event": "harness.started"
+    },
+    {
+      "t": 1792016399.881,
+      "event": "harness.finished",
+      "seconds": 40.7
+    },
+    {
+      "t": 1792016400.772,
+      "event": "exec.reads_done"
+    },
+    {
+      "t": 1792016401.67,
+      "event": "downloads.done",
+      "files": [
+        "exec-reads.txt",
+        "harness.err",
+        "harness.out",
+        "harness.rc",
+        "probe-report.md"
+      ]
+    },
+    {
+      "t": 1792016401.712,
+      "event": "gateway.log_saved",
+      "lines": 306
+    },
+    {
+      "t": 1792016401.981,
+      "event": "sandbox.deleted",
+      "gone": true
+    }
+  ]
+}

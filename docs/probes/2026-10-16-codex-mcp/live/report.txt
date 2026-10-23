@@ -1,0 +1,18 @@
+sandbox prefix ac9 for bus 127.0.0.1:8019
+policy main@b75f6a67d980 rendered for colima-mac; job copy 146 files
+git identity: the host's user.name and user.email
+harness codex exited 0 after 51 s
+codex final message:
+Committed FRUIT.md as `813049f`.
+
+- Request: `AO-1-i1`
+- Answer: `FRUIT-1260dbb0`
+- Inbox: `operator-i1` requested `Note: NOTE-81f11fe6`; acknowledged and included. Later inbox checks were empty.
+- Both acceptance commands passed (exit 0).
+- App verification blocked by missing `DATABASE_URL`: Launch/Drive exited 2; Doctor exited 1 (server, health, port, database checks failed). Cleanup exited 0.
+
+Evidence directory: evidence/20261016T080000Z
+acceptance ran in a fresh sandbox ac9-ao-1-r1-acc under the acceptance policy
+network: 192.168.5.2:8019 x12, ab.chatgpt.com:443 x1, chatgpt.com:443 x16, denied x3, denied 198.18.0.2:443 x3, files.pythonhosted.org:443 x18, pypi.org:443 x5
+effective policy matches the rendering
+result 813049fb1904 on ao/AO-1 (bundle 493 bytes)

@@ -1,0 +1,21 @@
+{
+  "password": "fixture-password",
+  "model_version": 4.5,
+  "v2_task_ids": [
+    "task-1",
+    "task-2",
+    "task-3",
+    "task-4",
+    "task-5",
+    "task-6",
+    "task-7"
+  ],
+  "v2_aos_task_ids": [
+    "task-1",
+    "task-2",
+    "task-3",
+    "task-5",
+    "task-6",
+    "task-7"
+  ]
+}

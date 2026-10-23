@@ -1,0 +1,446 @@
+{
+ "platform": "macOS with Colima aarch64",
+ "runtime_source": "3021bed4984eefda6083ed23a8d200dbc2ddd788",
+ "image": "aos-harness:release-da47c25",
+ "image_inspect_id": "sha256:8e8495fe8dd824f2585f1e3048417b3d0280ed7a642c80aa039615ae882e89f6",
+ "image_versions": "node=v24.21.0\nnpm=11.19.0\nclaude=2.1.296 (Claude Code)\ncodex=codex-cli 0.162.1\npi=1.1.0\nomp=omp/18.8.3\nuv=uv 0.13.0 (aarch64-unknown-linux-gnu)\npython=Python 3.12.15\nplaywright=Version 1.63.0\npoetry=Poetry (version 2.1.3)\nchromium=Chromium 155.0.8059.79 built on Debian GNU/Linux 12 (bookworm)\npostgresql=psql (PostgreSQL) 15.19 (Debian 15.19-0+deb12u1)\ntmux=tmux 3.3a\ndebian=12.15\nbase=node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20",
+ "gateway_version": "0.1.3",
+ "harness_timeout_s": 1800,
+ "interrupt_after_s": 45,
+ "configured_models": {
+  "claude": "claude-opus-5-5",
+  "codex": "CLI default; actual model unverified"
+ },
+ "not_run": {
+  "pi": "worker token expired; operator accepted release without Pi/omp cells on 2026-10-24",
+  "omp": "worker token expired; operator accepted release without Pi/omp cells on 2026-10-24"
+ },
+ "counts": {
+  "PASS": 18,
+  "FAIL": 2,
+  "BLOCKED": 0
+ },
+ "cells": [
+  {
+   "fixture": "demo-app",
+   "harness": "claude",
+   "scenario": "success",
+   "task": "AO-1",
+   "runs": [
+    "AO-1-r1"
+   ],
+   "status": "review",
+   "verdict": "pass",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "18147bb5fe49002da46407ac4fca297af87e8b6d",
+   "branch_tip": "18147bb5fe49002da46407ac4fca297af87e8b6d",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "demo-app",
+   "harness": "claude",
+   "scenario": "failed-verification",
+   "task": "AO-2",
+   "runs": [
+    "AO-2-r1"
+   ],
+   "status": "failed",
+   "verdict": "fail",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "646d7cd0d52fe0879f290a6a0b63bd9517dca354",
+   "branch_tip": "646d7cd0d52fe0879f290a6a0b63bd9517dca354",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "demo-app",
+   "harness": "claude",
+   "scenario": "interruption",
+   "task": "AO-3",
+   "runs": [
+    "AO-3-r1"
+   ],
+   "status": "cancelled",
+   "verdict": null,
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": null,
+   "branch_tip": null,
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "demo-app",
+   "harness": "claude",
+   "scenario": "retry",
+   "task": "AO-4",
+   "runs": [
+    "AO-4-r1",
+    "AO-4-r2"
+   ],
+   "status": "failed",
+   "verdict": null,
+   "outcome": "FAIL",
+   "sandbox_gone": true,
+   "result_commit": null,
+   "branch_tip": "d25c29793043a6a907ae19675ed97b8577b0b9e7",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "demo-app",
+   "harness": "claude",
+   "scenario": "runner-kill",
+   "task": "AO-5",
+   "runs": [
+    "AO-5-r1"
+   ],
+   "status": "blocked",
+   "verdict": null,
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": null,
+   "branch_tip": "bf8b89ad04e2e8f7cef6d2787a6c0f5ffeba3696",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "demo-app",
+   "harness": "codex",
+   "scenario": "success",
+   "task": "AO-6",
+   "runs": [
+    "AO-6-r1"
+   ],
+   "status": "review",
+   "verdict": "pass",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "33d003063d94a4f7af8aeb9ddee68f2a27083a48",
+   "branch_tip": "33d003063d94a4f7af8aeb9ddee68f2a27083a48",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "demo-app",
+   "harness": "codex",
+   "scenario": "failed-verification",
+   "task": "AO-7",
+   "runs": [
+    "AO-7-r1"
+   ],
+   "status": "failed",
+   "verdict": "fail",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "e05d7d2a69cfb4e6cadb3786a859efb317322969",
+   "branch_tip": "e05d7d2a69cfb4e6cadb3786a859efb317322969",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "demo-app",
+   "harness": "codex",
+   "scenario": "interruption",
+   "task": "AO-8",
+   "runs": [
+    "AO-8-r1"
+   ],
+   "status": "cancelled",
+   "verdict": null,
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": null,
+   "branch_tip": null,
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "demo-app",
+   "harness": "codex",
+   "scenario": "retry",
+   "task": "AO-9",
+   "runs": [
+    "AO-9-r1",
+    "AO-9-r2"
+   ],
+   "status": "failed",
+   "verdict": null,
+   "outcome": "FAIL",
+   "sandbox_gone": true,
+   "result_commit": null,
+   "branch_tip": "aa4e9d0e12aeff350f2b7fa23eef697ce3db358c",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "demo-app",
+   "harness": "codex",
+   "scenario": "runner-kill",
+   "task": "AO-10",
+   "runs": [
+    "AO-10-r1"
+   ],
+   "status": "blocked",
+   "verdict": null,
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": null,
+   "branch_tip": "ba8789253ebd214ddd5c828ca101b6a091add2cc",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "claude",
+   "scenario": "success",
+   "task": "AO-11",
+   "runs": [
+    "AO-11-r1"
+   ],
+   "status": "review",
+   "verdict": "pass",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "35622db969f6a2dfcef29a0a625296c811b5ef73",
+   "branch_tip": "35622db969f6a2dfcef29a0a625296c811b5ef73",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "claude",
+   "scenario": "failed-verification",
+   "task": "AO-12",
+   "runs": [
+    "AO-12-r1"
+   ],
+   "status": "failed",
+   "verdict": "fail",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "f55864775e3d431f8c2d38be334e81375cf156de",
+   "branch_tip": "f55864775e3d431f8c2d38be334e81375cf156de",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "claude",
+   "scenario": "interruption",
+   "task": "AO-13",
+   "runs": [
+    "AO-13-r1"
+   ],
+   "status": "cancelled",
+   "verdict": null,
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": null,
+   "branch_tip": null,
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "claude",
+   "scenario": "retry",
+   "task": "AO-14",
+   "runs": [
+    "AO-14-r1",
+    "AO-14-r2"
+   ],
+   "status": "review",
+   "verdict": "pass",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "431aa1b097a549f9b7356b41308e5d079e96bbca",
+   "branch_tip": "431aa1b097a549f9b7356b41308e5d079e96bbca",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "claude",
+   "scenario": "runner-kill",
+   "task": "AO-15",
+   "runs": [
+    "AO-15-r1"
+   ],
+   "status": "blocked",
+   "verdict": null,
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": null,
+   "branch_tip": null,
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "codex",
+   "scenario": "success",
+   "task": "AO-16",
+   "runs": [
+    "AO-16-r1"
+   ],
+   "status": "review",
+   "verdict": "pass",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "2b01bedf9a90ba40449c278660891dff014b2a57",
+   "branch_tip": "2b01bedf9a90ba40449c278660891dff014b2a57",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "codex",
+   "scenario": "failed-verification",
+   "task": "AO-17",
+   "runs": [
+    "AO-17-r1"
+   ],
+   "status": "failed",
+   "verdict": "fail",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "2640b70d9b3f1596e3dfcadf5c92e55786701d48",
+   "branch_tip": "2640b70d9b3f1596e3dfcadf5c92e55786701d48",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "codex",
+   "scenario": "interruption",
+   "task": "AO-18",
+   "runs": [
+    "AO-18-r1"
+   ],
+   "status": "cancelled",
+   "verdict": null,
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": null,
+   "branch_tip": null,
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "codex",
+   "scenario": "retry",
+   "task": "AO-19",
+   "runs": [
+    "AO-19-r1",
+    "AO-19-r2"
+   ],
+   "status": "review",
+   "verdict": "pass",
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": "fc38bcc6841442204c2e4cc584db16c2b963856a",
+   "branch_tip": "fc38bcc6841442204c2e4cc584db16c2b963856a",
+   "bus_group": "supported"
+  },
+  {
+   "fixture": "aos-example",
+   "harness": "codex",
+   "scenario": "runner-kill",
+   "task": "AO-20",
+   "runs": [
+    "AO-20-r1"
+   ],
+   "status": "blocked",
+   "verdict": null,
+   "outcome": "PASS",
+   "sandbox_gone": true,
+   "result_commit": null,
+   "branch_tip": null,
+   "bus_group": "supported"
+  }
+ ],
+ "failures": [
+  {
+   "fixture": "demo-app",
+   "harness": "claude",
+   "scenario": "retry",
+   "task": "AO-4",
+   "runs": [
+    "AO-4-r1",
+    "AO-4-r2"
+   ],
+   "error": "no commits on top of the previous attempt",
+   "first_run_result_commit_before_interrupt": "d25c29793043a6a907ae19675ed97b8577b0b9e7",
+   "cause": "The first run finished the fix and its result commit was recorded on ao/<task> before the scenario's SIGTERM (after 45 s of running) landed; the requeued run continued from that commit, added none, and the runner's continuing-run rule (since 2026-10-18, also in the previous candidate) ended it failed. A scenario-timing limit, not a candidate regression; the slower aos-example retry cells on the same host passed. Accepted as a qualification by the operator on 2026-10-24; not rerun."
+  },
+  {
+   "fixture": "demo-app",
+   "harness": "codex",
+   "scenario": "retry",
+   "task": "AO-9",
+   "runs": [
+    "AO-9-r1",
+    "AO-9-r2"
+   ],
+   "error": "no commits on top of the previous attempt",
+   "first_run_result_commit_before_interrupt": "aa4e9d0e12aeff350f2b7fa23eef697ce3db358c",
+   "cause": "The first run finished the fix and its result commit was recorded on ao/<task> before the scenario's SIGTERM (after 45 s of running) landed; the requeued run continued from that commit, added none, and the runner's continuing-run rule (since 2026-10-18, also in the previous candidate) ended it failed. A scenario-timing limit, not a candidate regression; the slower aos-example retry cells on the same host passed. Accepted as a qualification by the operator on 2026-10-24; not rerun."
+  }
+ ],
+ "readiness": {
+  "automatic_reachable": {
+   "expected": "run reaches review with the prompt written",
+   "met": true,
+   "run_status": "review",
+   "error": null,
+   "prompt_written": true,
+   "transient_run_credential_left": false,
+   "host_bus_health_before_after": [
+    200,
+    200
+   ]
+  },
+  "pull_reachable": {
+   "expected": "run reaches review with the prompt written",
+   "met": true,
+   "run_status": "review",
+   "error": null,
+   "prompt_written": true,
+   "transient_run_credential_left": false,
+   "host_bus_health_before_after": [
+    200,
+    200
+   ]
+  },
+  "automatic_unreachable": {
+   "expected": "refused before the prompt; host bus healthy",
+   "met": true,
+   "run_status": "blocked",
+   "error": "messaging readiness bus: authenticated sandbox probe failed",
+   "prompt_written": false,
+   "transient_run_credential_left": false,
+   "host_bus_health_before_after": [
+    200,
+    200
+   ]
+  },
+  "pull_unreachable": {
+   "expected": "refused before the prompt; host bus healthy",
+   "met": true,
+   "run_status": "blocked",
+   "error": "messaging readiness bus: authenticated sandbox probe failed",
+   "prompt_written": false,
+   "transient_run_credential_left": false,
+   "host_bus_health_before_after": [
+    200,
+    200
+   ]
+  }
+ },
+ "merged_acceptance": {
+  "fixture": "aos-example",
+  "task": "AO-11",
+  "exit": 0,
+  "status": "passed",
+  "head_sha": "35622db969f6a2dfcef29a0a625296c811b5ef73",
+  "base_sha": "b75f6a67d980c7c21aa3184dcb21dae2fd2d5abe",
+  "pytest_passed": 10,
+  "pass_lines": 4,
+  "command_exits": [
+   0,
+   0
+  ],
+  "fresh_sandbox": true
+ },
+ "token_scan": {
+  "tokens_observed": 4,
+  "logs_with_a_token": []
+ }
+}

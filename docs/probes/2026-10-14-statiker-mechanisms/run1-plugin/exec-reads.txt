@@ -1,0 +1,202 @@
+== pre-env ==
+uid=1000 HOME=/sandbox CODEX_HOME=unset CLAUDE_CONFIG_DIR=unset
+== pre-plugins ==
+/sandbox/plugins:
+total 16
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 21:07 .
+drwx------ 1 sandbox sandbox 4096 Oct 14 21:07 ..
+drwxr-xr-x 5 sandbox sandbox 4096 Sep 15 15:58 dispatch-guards
+drwxr-xr-x 6 sandbox sandbox 4096 Oct 13 16:06 statiker
+
+/sandbox/plugins/dispatch-guards:
+total 20
+drwxr-xr-x 5 sandbox sandbox 4096 Sep 15 15:58 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 21:07 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Sep 26 18:17 .claude-plugin
+drwxr-xr-x 2 sandbox sandbox 4096 Sep 26 18:17 hooks
+drwxr-xr-x 5 sandbox sandbox 4096 Sep 15 15:58 skills
+
+/sandbox/plugins/dispatch-guards/hooks:
+total 428
+drwxr-xr-x 2 sandbox sandbox   4096 Sep 26 18:17 .
+drwxr-xr-x 5 sandbox sandbox   4096 Sep 15 15:58 ..
+-rw-r--r-- 1 sandbox sandbox  48632 Sep 26 18:17 _dispatch_common.py
+-rwxr-xr-x 1 sandbox sandbox  43119 Sep 26 18:17 agent-model-gate.py
+-rwxr-xr-x 1 sandbox sandbox  11661 Sep 15 15:58 amend-gate.py
+-rwxr-xr-x 1 sandbox sandbox 124748 Sep 18 12:09 brief-reminder.py
+-rwxr-xr-x 1 sandbox sandbox   7037 Sep 15 15:58 discovery-volume-reminder.py
+-rwxr-xr-x 1 sandbox sandbox   8410 Sep 15 15:58 dispatch-log.py
+-rwxr-xr-x 1 sandbox sandbox  12212 Sep 18 12:09 dispatch-skill-gate.py
+-rw-r--r-- 1 sandbox sandbox   3335 Sep 15 15:58 hooks.json
+-rwxr-xr-x 1 sandbox sandbox   4693 Sep 15 15:58 message-payload-gate.py
+-rwxr-xr-x 1 sandbox sandbox  26539 Sep 15 15:58 push-claim-reminder.py
+-rwxr-xr-x 1 sandbox sandbox  10642 Sep 15 15:58 report-enforcer.py
+-rwxr-xr-x 1 sandbox sandbox   8700 Sep 15 15:58 report-form-gate.py
+-rwxr-xr-x 1 sandbox sandbox   2599 Sep 15 15:58 report-reminder.py
+-rwxr-xr-x 1 sandbox sandbox   4922 Sep 15 15:58 subagent-push-gate.py
+-rwxr-xr-x 1 sandbox sandbox  15334 Sep 15 15:58 worktree-config-gate.py
+-rwxr-xr-x 1 sandbox sandbox  20551 Sep 15 15:58 writer-claims-gate.py
+-rwxr-xr-x 1 sandbox sandbox  44984 Sep 15 15:58 writer-reservation-gate.py
+
+/sandbox/plugins/statiker:
+total 24
+drwxr-xr-x 6 sandbox sandbox 4096 Oct 13 16:06 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 21:07 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 13 16:06 .claude-plugin
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:01 .in_use
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 13 16:06 hooks
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 13 16:06 skills
+== pre-codex-home ==
+755 sandbox /sandbox/codex-home
+600 sandbox /sandbox/codex-home/auth.json
+
+== early-repo ==
+dot-git is a directory (full clone)
+f87d33fbc663ef64daa26ce574e3cb5609dafe05
+f87d33f probe: statiker fixtures (step1d tracker copy, stop-guard tracker)
+b75f6a6 README: aos run under AOS has no --dry-run on the OpenShell route
+1447ca5 OpenShell: v2 policy, sandbox-safe Chromium flags, runner-provided database and evidence contract
+.clippy/runs/2026-10-05-repo-policy-step1d.md
+.clippy/runs/2026-10-14-probe-statiker.md
+ls: cannot access '.git/worktrees': No such file or directory
+== early-main-env ==
+bash: line 2: /proc/57/environ: Permission denied
+bash: line 2: /proc/146/environ: Permission denied
+bash: line 2: /proc/147/environ: Permission denied
+pid 57
+pid 146
+pid 147
+pid 166
+HOME=/sandbox
+PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games
+pid 174
+HOME=/sandbox
+PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games
+pid 175
+HOME=/sandbox
+PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games
+
+== subagent-files ==
+-- /sandbox/sub-opus.txt
+claude-opus-5-5
+-- /sandbox/sub-opus-curl.txt
+exit=7
+curl: (7) Failed to connect to example.com port 443 after 2 ms: Couldn't connect to server
+-- /sandbox/sub-haiku.txt
+claude-haiku-5-5
+-- /sandbox/sub-haiku-curl.txt
+exit=7 first=curl: (7) Failed to connect to example.com port 443 after 3 ms: Couldn't connect to server
+-- /sandbox/sub-sonnet.txt
+claude-sonnet-5-5
+-- /sandbox/sub-sonnet-curl.txt
+7 curl: (7) Failed to connect to example.com port 443 after 1 ms: Couldn't connect to server
+== filter-artifact ==
+exists 164825 bytes
+# Run: repo policy step 1d (agent_os/policy.py, runner integration, directive amendment) — successor of 2026-10-05-repo-policy-step1c
+Status: COMPLETE
+Phase: verify
+Skill: statiker 0.2.104
+Effort: full
+== statiker-state ==
+/home/sandbox/.local/state/statiker:
+total 8
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:10 .
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:10 ..
+-rw-r--r-- 1 sandbox sandbox    0 Oct 14 21:10 mark2
+== firelog ==
+ls: cannot access '/home/sandbox/.local/share/claude': No such file or directory
+bash: line 4: /home/sandbox/.local/share/claude/*.jsonl: No such file or directory
+-- /home/sandbox/.local/share/claude/*.jsonl lines=
+tail: cannot open '/home/sandbox/.local/share/claude/*.jsonl' for reading: No such file or directory
+== worktrees ==
+total 8
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:08 .
+drwxr-xr-x 8 sandbox sandbox 4096 Oct 14 21:10 ..
+/sandbox/repo  e8b711c [main]
+== usr-paths ==
+ls: cannot access '/usr/local/stk-wt': No such file or directory
+ls: cannot access '/usr/stk-mark': No such file or directory
+== codex-hello ==
+terra-ok
+== stopguard-file ==
+cat: /sandbox/repo/stopguard-ran.txt: No such file or directory
+== repo-after ==
+e8b711c probe: statiker mechanism report
+f87d33f probe: statiker fixtures (step1d tracker copy, stop-guard tracker)
+b75f6a6 README: aos run under AOS has no --dry-run on the OpenShell route
+1447ca5 OpenShell: v2 policy, sandbox-safe Chromium flags, runner-provided database and evidence contract
+f61e398 pyproject: declare the Apache-2.0 license and LICENSE file (as agent-os)
+?? codex-hello.txt
+== codex-auth ==
+0fd8cd9c897f8677af5cd58d99b7f6c7bb594a4bd8a173402d9ceb7b9b075872
+600
+total 968
+drwxr-xr-x 8 sandbox sandbox   4096 Oct 14 21:10 .
+drwx------ 1 sandbox sandbox   4096 Oct 14 21:10 ..
+-rw------- 1 sandbox sandbox      3 Oct 14 21:09 .sandbox_migration
+-rw------- 1 sandbox sandbox   3884 Oct 14 21:07 auth.json
+drwxr-xr-x 4 sandbox sandbox   4096 Oct 14 21:09 cache
+-rw------- 1 sandbox sandbox     51 Oct 14 21:09 config.toml
+-rw-r--r-- 1 sandbox sandbox  32768 Oct 14 21:09 goals_1.sqlite
+-rw-r--r-- 1 sandbox sandbox     36 Oct 14 21:09 installation_id
+-rw-r--r-- 1 sandbox sandbox  49152 Oct 14 21:09 logs_2.sqlite
+-rw-r--r-- 1 sandbox sandbox  45056 Oct 14 21:09 memories_1.sqlite
+-rw-r--r-- 1 sandbox sandbox 399166 Oct 14 21:09 models_cache.json
+-rw-r--r-- 1 sandbox sandbox  40960 Oct 14 21:09 queue_1.sqlite
+drwxr-xr-x 3 sandbox sandbox   4096 Oct 14 21:09 sessions
+drwxr-xr-x 2 sandbox sandbox   4096 Oct 14 21:10 shell_snapshots
+drwxr-xr-x 3 sandbox sandbox   4096 Oct 14 21:09 skills
+-rw-r--r-- 1 sandbox sandbox 270336 Oct 14 21:10 state_5.sqlite
+drwxr-xr-x 2 sandbox sandbox   4096 Oct 14 21:10 thread-writer-locks
+-rw-r--r-- 1 sandbox sandbox 102400 Oct 14 21:10 thread_history_1.sqlite
+drwxr-xr-x 3 sandbox sandbox   4096 Oct 14 21:09 tmp
+== claude-home ==
+/tmp/claude-home
+/tmp/claude-home/backups
+/tmp/claude-home/backups/.claude.json.backup.1792012068983
+/tmp/claude-home/backups/.claude.json.backup.1792012193472
+/tmp/claude-home/backups/.claude.json.backup.1792012133399
+/tmp/claude-home/sessions
+/tmp/claude-home/.last-cleanup
+/tmp/claude-home/policy-limits.json
+/tmp/claude-home/session-env
+/tmp/claude-home/session-env/df1caf5d-bdec-4a25-9b48-a57316b11d78
+/tmp/claude-home/.claude.json
+/tmp/claude-home/projects
+/tmp/claude-home/projects/-sandbox-repo
+/tmp/claude-home/projects/-sandbox-repo/df1caf5d-bdec-4a25-9b48-a57316b11d78
+/tmp/claude-home/projects/-sandbox-repo/df1caf5d-bdec-4a25-9b48-a57316b11d78/subagents
+/tmp/claude-home/projects/-sandbox-repo/memory
+/tmp/claude-home/projects/-sandbox-repo/df1caf5d-bdec-4a25-9b48-a57316b11d78.jsonl
+/tmp/claude-home/remote-settings.json
+/tmp/claude-home/policy-limits.json.stamp.json
+/tmp/claude-home/shell-snapshots
+/tmp/claude-home/plugins
+/tmp/claude-home/plugins/data
+/tmp/claude-home/plugins/data/dispatch-guards-inline
+== tmp ==
+total 232
+drwxrwxrwt 1 root    root      4096 Oct 14 21:10 .
+drwxr-xr-x 1 root    root      4096 Oct 14 21:07 ..
+drwx------ 2 sandbox sandbox   4096 Oct 14 21:10 cc-socks
+drwx------ 3 sandbox sandbox   4096 Oct 14 21:07 claude-1000
+drwxr-xr-x 8 sandbox sandbox   4096 Oct 14 21:10 claude-home
+drwxr-xr-x 2 sandbox sandbox   4096 Oct 14 21:09 codex-bwrap-synthetic-mount-targets-1000
+drwx------ 2 sandbox sandbox   4096 Oct 14 21:09 codex-daemon-1000
+-rw-r--r-- 1 sandbox sandbox   1756 Oct 14 21:09 codex-r6a.err
+-rw-r--r-- 1 sandbox sandbox    203 Oct 14 21:09 codex-r6a.out
+-rw-r--r-- 1 sandbox sandbox   1166 Oct 14 21:09 codex-r6b.err
+-rw-r--r-- 1 sandbox sandbox     99 Oct 14 21:09 codex-r6b.out
+-rw-r--r-- 1 sandbox sandbox   1265 Oct 14 21:09 codex-r6c.err
+-rw-r--r-- 1 sandbox sandbox     88 Oct 14 21:09 codex-r6c.out
+-rw-r--r-- 1 sandbox sandbox    731 Oct 14 21:10 codex-r6d.err
+-rw-r--r-- 1 sandbox sandbox     62 Oct 14 21:10 codex-r6d.out
+drwxr-xr-x 2 sandbox sandbox   4096 Oct 14 21:07 pi-agent
+drwxr-xr-x 2 sandbox sandbox   4096 Oct 14 21:07 pi-home
+-rw-r--r-- 1 sandbox sandbox 164825 Oct 14 21:08 stk-filter.md
+
+== in-sandbox-scan ==
+files under /sandbox holding a codex token: {'id_token': 0, 'access_token': 0, 'refresh_token': 0}; control 'aos-policy': 3
+files under /tmp holding a codex token: {'id_token': 0, 'access_token': 0, 'refresh_token': 0}; control '"type"': 5
+files under /home/sandbox holding a codex token: {'id_token': 0, 'access_token': 0, 'refresh_token': 0}; control 'PS1': 1
+codex tokens in the decompressed git objects: {'id_token': 0, 'access_token': 0, 'refresh_token': 0}; control 'statiker fixtures': 1

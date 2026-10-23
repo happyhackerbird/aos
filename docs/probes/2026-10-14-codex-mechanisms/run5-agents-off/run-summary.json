@@ -1,0 +1,82 @@
+{
+  "name": "cxm-agents-off",
+  "mode": "agents-off",
+  "phrases": {
+    "user-skill": "PHRASE-USER-2b86c8",
+    "home-skill": "PHRASE-HOME-969e9f",
+    "repo-skill": "PHRASE-REPO-b20b21",
+    "plugin-skill": "PHRASE-PLUGIN-642c70"
+  },
+  "codeword": "CODEWORD-59a649",
+  "command": "CODEX_HOME=/sandbox/codex-home codex exec --json --skip-git-repo-check --sandbox danger-full-access -c approval_policy=\"never\" -c features.hooks=false -c features.multi_agent=false -c features.plugins=false -c agents.enabled=false -c features.apps=false \"$(cat /sandbox/prompt.txt)\"",
+  "effective_policy_problems": [],
+  "harness_seconds": 40.8,
+  "codex_auth_unchanged": true,
+  "gateway_denied_lines": 2,
+  "harness_rc": "0",
+  "timeline": [
+    {
+      "t": 1792015904.466,
+      "event": "sandbox.created",
+      "name": "cxm-agents-off",
+      "image": "aos-harness:comms"
+    },
+    {
+      "t": 1792015904.572,
+      "event": "policy.effective",
+      "problems": []
+    },
+    {
+      "t": 1792015905.085,
+      "event": "fixtures.installed"
+    },
+    {
+      "t": 1792015905.318,
+      "event": "codex_auth.uploaded"
+    },
+    {
+      "t": 1792015905.5,
+      "event": "prompt.uploaded"
+    },
+    {
+      "t": 1792015905.887,
+      "event": "job.released",
+      "bytes": 219921
+    },
+    {
+      "t": 1792015908.361,
+      "event": "harness.started"
+    },
+    {
+      "t": 1792015949.124,
+      "event": "harness.finished",
+      "seconds": 40.8
+    },
+    {
+      "t": 1792015949.604,
+      "event": "exec.reads_done",
+      "codex_auth_unchanged": true
+    },
+    {
+      "t": 1792015950.597,
+      "event": "downloads.done",
+      "files": [
+        "exec-reads.txt",
+        "harness.err",
+        "harness.out",
+        "harness.rc",
+        "probe-report.md"
+      ]
+    },
+    {
+      "t": 1792015950.64,
+      "event": "gateway.log_saved",
+      "lines": 303
+    },
+    {
+      "t": 1792015950.89,
+      "event": "sandbox.deleted",
+      "gone": true
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+gateway log lines: 306; DENIED lines: 3; ALLOWED lines: 2
+
+DENIED (count, line):
+     1  [OCSF ] [ocsf] NET:REFUSE [MED] DENIED example.com [reason:policy_dns_ineligible]
+     1  [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/local/bin/node(0) -> example.com:443 [reason:transparent_tcp_policy_denied]
+     1  [OCSF ] [ocsf] NET:REFUSE [MED] DENIED ca611750401d [reason:policy_dns_ineligible]
+
+ALLOWED destinations (count, target):
+     1  chatgpt.com:443
+     1  GET http://chatgpt.com:443/backend-api/codex/responses

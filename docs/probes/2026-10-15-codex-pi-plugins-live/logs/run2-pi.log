@@ -1,0 +1,4 @@
+note: pi is not on this host; capabilities are checked inside the sandbox
+claimed AO-5-r1
+acceptance 3/3 pass
+result review

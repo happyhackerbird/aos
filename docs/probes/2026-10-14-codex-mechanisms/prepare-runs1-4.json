@@ -1,0 +1,34 @@
+{
+  "phrases": {
+    "user-skill": "PHRASE-USER-09150e",
+    "home-skill": "PHRASE-HOME-0df55d",
+    "repo-skill": "PHRASE-REPO-4fb6f0"
+  },
+  "base_commit": "b75f6a67d980c7c21aa3184dcb21dae2fd2d5abe",
+  "fixture_commit": "fa57d6b6fb35abb63c08ba1f16fe187f08dbce7c",
+  "committed": [
+    ".agents/skills/repo-skill/SKILL.md"
+  ],
+  "tarball": {
+    "path": "/private/tmp/claude-501/-Users-operator-code-agent-os/732a9ebe-2df5-4c4d-a185-12afb60da8e5/scratchpad/cx/job.tgz",
+    "bytes": 219977,
+    "sha256": "0370465d86ca85ef54de68db425ab9679022a58a2b4445174247fa00229dc52e"
+  },
+  "plugins": {
+    "path": "/private/tmp/claude-501/-Users-operator-code-agent-os/732a9ebe-2df5-4c4d-a185-12afb60da8e5/scratchpad/cx/plugins.tgz",
+    "bytes": 2933,
+    "sha256": "a4408c3320d82012e29ff18d10c0ab5fb466635143fff647ae1cff89bb95218f",
+    "members": [
+      "codex-probe",
+      "codex-probe/agents",
+      "codex-probe/agents/probe-mini.toml",
+      "codex-probe/hook.py",
+      "codex-probe/hooks.json",
+      "codex-probe/skills",
+      "codex-probe/skills/home-skill",
+      "codex-probe/skills/home-skill/SKILL.md",
+      "codex-probe/skills/user-skill",
+      "codex-probe/skills/user-skill/SKILL.md"
+    ]
+  }
+}

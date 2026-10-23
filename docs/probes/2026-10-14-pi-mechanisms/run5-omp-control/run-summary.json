@@ -1,0 +1,84 @@
+{
+  "name": "pim-omp-control",
+  "flavour": "omp",
+  "mode": "control",
+  "model": "openai-codex/gpt-6-luna",
+  "phrases": {
+    "probe-skill": "PHRASE-PROBE-d0d3d5",
+    "probe-skill-home": "PHRASE-HOME-9d38c1",
+    "repo-skill": "PHRASE-REPO-8561f7"
+  },
+  "auth": "PiAuth(expires_ms=1792687336000, expiry_source='jwt')",
+  "codeword": "CODEWORD-c44766",
+  "session_id": null,
+  "command": "PI_CODING_AGENT_DIR=/tmp/pi-agent HOME=/tmp/pi-home omp --print --mode json --model openai-codex/gpt-6-luna --session-dir /sandbox/pi-sessions --no-extensions --no-skills --no-rules --no-title --max-time 2700 --approval-mode=yolo",
+  "effective_policy_problems": [],
+  "harness_seconds": 40.7,
+  "gateway_denied_lines": 14,
+  "harness_rc": "0",
+  "timeline": [
+    {
+      "t": 1792016308.75,
+      "event": "sandbox.created",
+      "name": "pim-omp-control",
+      "image": "aos-harness:comms"
+    },
+    {
+      "t": 1792016308.854,
+      "event": "policy.effective",
+      "problems": []
+    },
+    {
+      "t": 1792016309.163,
+      "event": "fixtures.installed"
+    },
+    {
+      "t": 1792016309.4,
+      "event": "pi_auth.uploaded",
+      "path": "/tmp/pi-agent/agent.db"
+    },
+    {
+      "t": 1792016309.586,
+      "event": "prompt.uploaded"
+    },
+    {
+      "t": 1792016310.157,
+      "event": "job.released",
+      "bytes": 219840
+    },
+    {
+      "t": 1792016313.097,
+      "event": "harness.started"
+    },
+    {
+      "t": 1792016353.829,
+      "event": "harness.finished",
+      "seconds": 40.7
+    },
+    {
+      "t": 1792016355.401,
+      "event": "exec.reads_done"
+    },
+    {
+      "t": 1792016357.553,
+      "event": "downloads.done",
+      "files": [
+        "exec-reads.txt",
+        "harness.err",
+        "harness.out",
+        "harness.rc",
+        "probe-report.md"
+      ]
+    },
+    {
+      "t": 1792016357.646,
+      "event": "gateway.log_saved",
+      "lines": 278
+    },
+    {
+      "t": 1792016358.608,
+      "event": "sandbox.deleted",
+      "gone": true
+    }
+  ]
+}

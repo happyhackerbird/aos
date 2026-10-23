@@ -1,0 +1,90 @@
+mode=agents-off events=25 non-json-lines=0 harness.rc=0
+thread=01a13c78-b791-7620-9a39-beceaf15b7cd items={'agent_message': 2, 'command_execution': 10} usage={"input_tokens": 78291, "cached_input_tokens": 60800, "cache_write_input_tokens": 0, "output_tokens": 1320, "reasoning_output_tokens": 77}
+
+K1 skills: user ($HOME/.agents/skills), home ($CODEX_HOME/skills), repo (.agents/skills); nope-skill negative
+  report home-skill: Code phrase: PHRASE-HOME-969e9f
+  report home-skill path: /sandbox/codex-home/skills/home-skill/SKILL.md
+  report nope-skill: NO-SKILL
+  report plugin-skill: NO-SKILL
+  report repo-skill: Code phrase: PHRASE-REPO-b20b21
+  report repo-skill path: /sandbox/repo/.agents/skills/repo-skill/SKILL.md
+  report user-skill: Code phrase: PHRASE-USER-2b86c8
+  report user-skill path: /sandbox/.agents/skills/user-skill/SKILL.md
+  read: /bin/bash -lc 'cat /sandbox/.agents/skills/user-skill/SKILL.md /sandbox/codex-home/skills/home-skill/SKILL.md /sandbox/repo/.agents/skills/repo-skill/SKILL.md' exit=0
+  read: /bin/bash -lc "cat >> /sandbox/repo/probe-report.md <<'EOF'\n## K1\nuser-skill: Code phrase: PHRASE-USER-2b86c8\nhome-skill: Code phrase: PHRASE-HOME-969e9f\nrepo-skill: Code phrase: PHRASE-REPO-b20b2... [447 chars] exit=0
+  plugin-skill phrase found: False (recorded; see the plugin-install exec read)
+  phrase found: {'user-skill': True, 'home-skill': True, 'repo-skill': True}; nope-skill negative holds: True
+  => PASS
+
+K2 hooks: the fire log per event, the SessionStart boundary read, the PreToolUse deny, the Stop block
+  fire log lines=0 events={}
+  deny decisions=0 stop fires=0 stop decisions=[]
+  K2b item status=completed exit=0 out=## K2b\n@@ deny\nHOOK-DENY-ME\n
+  K2a ran=True; K2b command items=1 ran(output seen)=True; agent texts naming a denial/hook=0
+  final message carries STOP-HOOK-SEEN: False
+  K2c in-run cat of the fire log: cat: /sandbox/.local/share/codex-probe/fires.jsonl: No such file or directory\nrc=0
+  => PASS
+
+K3 worktrees: git worktree add under /tmp (ok), /usr/local (denied), remove; codex exec --worktree (mech)
+  wt-add-tmp rc=0 Preparing worktree (detached HEAD d1e0ed0)\nHEAD is now at d1e0ed0 probe: codex fixtures (repository skill)\nrc=0
+  wt-list: /sandbox/repo  d1e0ed0 [main]\n/tmp/cx-wt-1   d1e0ed0 (detached HEAD)
+  wt-remove rc=0 rc=0
+  wt-add-usr rc=128 Preparing worktree (detached HEAD d1e0ed0)\nfatal: could not create leading directories of '/usr/local/cx-wt/.git': Permission denied\nrc=128
+  exec after the run: total 8\ndrwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:12 .\ndrwxr-xr-x 8 sandbox sandbox 4096 Oct 14 22:12 ..\n/sandbox/repo  deaa8d8 [main]
+  exec /usr paths: ls: cannot access '/usr/local/cx-wt': No such file or directory\nls: cannot access '/usr/cx-mark': No such file or directory\nls: cannot access '/usr/codex-probe-mark': No such file or directory
+  => PASS
+
+K4 subagents: spawn with the custom role probe-mini (own model) and with the default; files, curl, env, code word
+  item types: {'agent_message': 2, 'command_execution': 10}
+  sub-mini.txt=cat: /sandbox/sub-mini.txt: No such file or directory curl=cat: /sandbox/sub-mini-curl.txt: No such file or directory env=cat: /sandbox/sub-mini-env.txt: No such ... [57 chars]
+  sub-default.txt=cat: /sandbox/sub-default.txt: No such file or directory curl=cat: /sandbox/sub-default-curl.txt: No such file or directory env=cat: /sandbox/sub-default-env.txt: No su... [60 chars]
+  rollouts: rollouts under /sandbox/codex-home/sessions: 1
+  rollout sessions/2026/10/14/rollout-2026-10-14T22-11-48-01a13c78-b791-7620-9a39-beceaf15b7cd.jsonl... [101 chars] models=['gpt-6.1-sol'] meta={"id": "01a13c78-b791-7620-9a39-beceaf15b7cd", "cwd": "/sandbox/repo", "originator": "codex_exec", "cli_version": "0.162.1", "source": "exec", "model_provider": "openai"}
+  code word: in spawn args=0, in subagent files=0; positive control, in the final message=1
+  NO-SUBAGENT-TOOLS line: NO-SUBAGENT-TOOLS: functions.exec, functions.wait, functions.request_user_input, functions.request_user_input_async, clock.sleep; tools exposed through functions.exec: apply_patch, create_goal, exec_c... [371 chars]; collab items=0; files absent=True
+  => PASS
+
+K5 boundaries in the model's shell: the token entries, HOME/CODEX_HOME, a /usr write, a state write
+  env | grep -c CLAUDE_CODE_OAUTH_TOKEN: 0 (no provider attached: 0 expected)
+  printenv ... | cut -c1-12: 
+  home: HOME=/sandbox CODEX_HOME=/sandbox/codex-home
+  /usr/cx-mark: rc=1 Traceback (most recent call last):\n  File "<string>", line 1, in <module>\nPermissionError: [Errno 13] Permission denied: '/usr/cx-mark'\nrc=1
+  ~/.local/state/codex-probe/mark-shell: rc=0 /sandbox/.local/state/codex-probe\nrc=0
+  exec ~/.local/state after the run: /sandbox/.local/state:\ntotal 12\ndrwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:12 .\ndrwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:12 ..\ndrwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:12 codex-probe\n\n/sandbox/.local/state/codex-probe:\ntotal 8\ndrwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:12 .\ndrwxr-xr... [400 chars]
+  => PASS
+
+K6 state directory: rollouts and logs under CODEX_HOME=/sandbox/codex-home; the auth file unchanged
+  codex-home listing: .\n./.sandbox_migration\n./agents\n./agents/probe-mini.toml\n./auth.json\n./config.toml\n./goals_1.sqlite\n./hooks.json\n./installation_id\n./logs_2.sqlite\n./memories_1.sqlite\n./models_cache.json\n./queue_1.sqlite\n./sessions\n./shell_snapshots\n./skills\n./skills/.system\n./skills/.system/.codex-system-skills.marker\n./skills/.system/imagegen\n./skills/.system/openai-docs\n./skills/.system/review-agent\n./skills/.system/skill-creator\n./skills/.system/skill-installer\n./skills/home-skill\n./s... [691 chars]
+  rollouts header: rollouts under /sandbox/codex-home/sessions: 1
+  auth: 0fd8cd9c897f8677af5cd58d99b7f6c7bb594a4bd8a173402d9ceb7b9b075872\n600\ntotal 1000\ndrwxr-xr-x 8 sandbox sandbox   4096 Oct 14 22:12 .\ndrwx------ 1 sandbox sandbox   4096 Oct 14 22:12 ..\n-rw------- 1... [1336 chars]
+  => PASS
+
+K7 the run itself: thread id, item counts, usage, errors, harness.rc, final message
+  thread=01a13c78-b791-7620-9a39-beceaf15b7cd events=25 non-json-lines=0 harness.rc=0
+  item types={'agent_message': 2, 'command_execution': 10} usage={"input_tokens": 78291, "cached_input_tokens": 60800, "cache_write_input_tokens": 0, "output_tokens": 1320, "reasoning_output_tokens": 77}
+  final: Recorded the probe in [probe-report.md](/sandbox/repo/probe-report.md) and committed as `deaa8d8`. No push. The End output was appended after the commit and remains uncommitted.\n\nFINAL: CODEWORD-59a649
+  => PASS
+
+secret scan over 5 downloaded files, labels ['claude_oauth_token', 'codex_access_token', 'codex_id_token', 'codex_refresh_token'] (values never printed):
+  exec-reads.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (10652 bytes)
+  harness.err: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (241 bytes)
+  harness.out: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (14112 bytes)
+  harness.rc: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (2 bytes)
+  probe-report.md: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (3807 bytes)
+  total hits: 0; positive control (planted string in a copy of the first file): 1
+
+secret scan over the 13 evidence files (values never printed):
+  checks.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  codex-command.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  effective-policy.yaml: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  exec-reads.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  gateway-log.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  gateway-status.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  main-script.sh: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  probe-report.md: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  prompt.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  run-summary.json: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  sandboxes-after.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  sandboxes-before.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  stream-events.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  total hits: 0; positive control: 1

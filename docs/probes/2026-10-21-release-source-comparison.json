@@ -1,0 +1,275 @@
+{
+  "runtime_source": "9fe5d741e32da230cf94af3fcc4cd50b70906ca4",
+  "runtime_archive_sha256": "0e5aa6aaf6720f821d15b007905942775773b2219efacfc088814127e14b9dea",
+  "compared_export_source": "70eea221e6a029a7a2ecfafc992c42c655dd8530",
+  "scope": "Runtime/package/image-input/driver file bytes, not equality of all source trees or Docker images. Later handoff artifact checks recompare these rows.",
+  "all_equal": true,
+  "files": [
+    {
+      "path": "agent_os/__init__.py",
+      "runtime_archive_sha256": "5384bfdb2df380b6557cc7a71d16891415bccaa87699406e236f752c6415389f",
+      "export_sha256": "5384bfdb2df380b6557cc7a71d16891415bccaa87699406e236f752c6415389f",
+      "mac_runtime_source_sha256": "5384bfdb2df380b6557cc7a71d16891415bccaa87699406e236f752c6415389f",
+      "linux_runtime_source_sha256": "5384bfdb2df380b6557cc7a71d16891415bccaa87699406e236f752c6415389f"
+    },
+    {
+      "path": "agent_os/__main__.py",
+      "runtime_archive_sha256": "29251d155d023bcb1006ced0c6a5fab15eb1b4ebc9c2c88c8168be5136c4bf5a",
+      "export_sha256": "29251d155d023bcb1006ced0c6a5fab15eb1b4ebc9c2c88c8168be5136c4bf5a",
+      "mac_runtime_source_sha256": "29251d155d023bcb1006ced0c6a5fab15eb1b4ebc9c2c88c8168be5136c4bf5a",
+      "linux_runtime_source_sha256": "29251d155d023bcb1006ced0c6a5fab15eb1b4ebc9c2c88c8168be5136c4bf5a"
+    },
+    {
+      "path": "agent_os/api.py",
+      "runtime_archive_sha256": "995b8fdbadff3ad91a4fb279483968074eb705014708a8a0a6f1e55c486e6d12",
+      "export_sha256": "995b8fdbadff3ad91a4fb279483968074eb705014708a8a0a6f1e55c486e6d12",
+      "mac_runtime_source_sha256": "995b8fdbadff3ad91a4fb279483968074eb705014708a8a0a6f1e55c486e6d12",
+      "linux_runtime_source_sha256": "995b8fdbadff3ad91a4fb279483968074eb705014708a8a0a6f1e55c486e6d12"
+    },
+    {
+      "path": "agent_os/cleanup.py",
+      "runtime_archive_sha256": "e382185bd0c4d055862596c14759d1b17471702484a6a40572b8dbffbf8207a8",
+      "export_sha256": "e382185bd0c4d055862596c14759d1b17471702484a6a40572b8dbffbf8207a8",
+      "mac_runtime_source_sha256": "e382185bd0c4d055862596c14759d1b17471702484a6a40572b8dbffbf8207a8",
+      "linux_runtime_source_sha256": "e382185bd0c4d055862596c14759d1b17471702484a6a40572b8dbffbf8207a8"
+    },
+    {
+      "path": "agent_os/cli.py",
+      "runtime_archive_sha256": "6ce04d44100e9d101a8a9edf26a1c1a77902d2424dee21385ebba9d1be0a4739",
+      "export_sha256": "6ce04d44100e9d101a8a9edf26a1c1a77902d2424dee21385ebba9d1be0a4739",
+      "mac_runtime_source_sha256": "6ce04d44100e9d101a8a9edf26a1c1a77902d2424dee21385ebba9d1be0a4739",
+      "linux_runtime_source_sha256": "6ce04d44100e9d101a8a9edf26a1c1a77902d2424dee21385ebba9d1be0a4739"
+    },
+    {
+      "path": "agent_os/config.py",
+      "runtime_archive_sha256": "9cfbf1bc05ef015ce92fda2ffce7eb216f3de22195fe6b65a9c0ac06380f0114",
+      "export_sha256": "9cfbf1bc05ef015ce92fda2ffce7eb216f3de22195fe6b65a9c0ac06380f0114",
+      "mac_runtime_source_sha256": "9cfbf1bc05ef015ce92fda2ffce7eb216f3de22195fe6b65a9c0ac06380f0114",
+      "linux_runtime_source_sha256": "9cfbf1bc05ef015ce92fda2ffce7eb216f3de22195fe6b65a9c0ac06380f0114"
+    },
+    {
+      "path": "agent_os/credential_bootstrap.py",
+      "runtime_archive_sha256": "4188720cffe210199d56e47862282d80ef84cd86ade58d4fb68f7f03f2180419",
+      "export_sha256": "4188720cffe210199d56e47862282d80ef84cd86ade58d4fb68f7f03f2180419",
+      "mac_runtime_source_sha256": "4188720cffe210199d56e47862282d80ef84cd86ade58d4fb68f7f03f2180419",
+      "linux_runtime_source_sha256": "4188720cffe210199d56e47862282d80ef84cd86ade58d4fb68f7f03f2180419"
+    },
+    {
+      "path": "agent_os/dispatch.py",
+      "runtime_archive_sha256": "83cbe72336328516010b61cc5f93ab6554122aa75f1ae0470175cecda4607eb0",
+      "export_sha256": "83cbe72336328516010b61cc5f93ab6554122aa75f1ae0470175cecda4607eb0",
+      "mac_runtime_source_sha256": "83cbe72336328516010b61cc5f93ab6554122aa75f1ae0470175cecda4607eb0",
+      "linux_runtime_source_sha256": "83cbe72336328516010b61cc5f93ab6554122aa75f1ae0470175cecda4607eb0"
+    },
+    {
+      "path": "agent_os/evidence.py",
+      "runtime_archive_sha256": "e8c18d713ac3d3623fa74b74fbd668a45163ead6bb1aa213618e240569354645",
+      "export_sha256": "e8c18d713ac3d3623fa74b74fbd668a45163ead6bb1aa213618e240569354645",
+      "mac_runtime_source_sha256": "e8c18d713ac3d3623fa74b74fbd668a45163ead6bb1aa213618e240569354645",
+      "linux_runtime_source_sha256": "e8c18d713ac3d3623fa74b74fbd668a45163ead6bb1aa213618e240569354645"
+    },
+    {
+      "path": "agent_os/github.py",
+      "runtime_archive_sha256": "0cd0952fb571d69d06e2825c5e9aa59e2d7f474cd268911050561691f5c128ff",
+      "export_sha256": "0cd0952fb571d69d06e2825c5e9aa59e2d7f474cd268911050561691f5c128ff",
+      "mac_runtime_source_sha256": "0cd0952fb571d69d06e2825c5e9aa59e2d7f474cd268911050561691f5c128ff",
+      "linux_runtime_source_sha256": "0cd0952fb571d69d06e2825c5e9aa59e2d7f474cd268911050561691f5c128ff"
+    },
+    {
+      "path": "agent_os/gitops.py",
+      "runtime_archive_sha256": "2b7fdf2983f11d4c268d93a42f240f7e3ed292c70177c901b6a170a0169a8a36",
+      "export_sha256": "2b7fdf2983f11d4c268d93a42f240f7e3ed292c70177c901b6a170a0169a8a36",
+      "mac_runtime_source_sha256": "2b7fdf2983f11d4c268d93a42f240f7e3ed292c70177c901b6a170a0169a8a36",
+      "linux_runtime_source_sha256": "2b7fdf2983f11d4c268d93a42f240f7e3ed292c70177c901b6a170a0169a8a36"
+    },
+    {
+      "path": "agent_os/harness.py",
+      "runtime_archive_sha256": "bcd613dce6689c367b49dbac8975341527f4894c386a94bd8e4972886e78f630",
+      "export_sha256": "bcd613dce6689c367b49dbac8975341527f4894c386a94bd8e4972886e78f630",
+      "mac_runtime_source_sha256": "bcd613dce6689c367b49dbac8975341527f4894c386a94bd8e4972886e78f630",
+      "linux_runtime_source_sha256": "bcd613dce6689c367b49dbac8975341527f4894c386a94bd8e4972886e78f630"
+    },
+    {
+      "path": "agent_os/health.py",
+      "runtime_archive_sha256": "a726236186873acdf901c29c03c28f9a78852e6b110156118cd381430dbd51be",
+      "export_sha256": "a726236186873acdf901c29c03c28f9a78852e6b110156118cd381430dbd51be",
+      "mac_runtime_source_sha256": "a726236186873acdf901c29c03c28f9a78852e6b110156118cd381430dbd51be",
+      "linux_runtime_source_sha256": "a726236186873acdf901c29c03c28f9a78852e6b110156118cd381430dbd51be"
+    },
+    {
+      "path": "agent_os/integrate.py",
+      "runtime_archive_sha256": "f73020af3567021c4970775f61a9d43850611ff322b8319c6ee2c821d0032d8a",
+      "export_sha256": "f73020af3567021c4970775f61a9d43850611ff322b8319c6ee2c821d0032d8a",
+      "mac_runtime_source_sha256": "f73020af3567021c4970775f61a9d43850611ff322b8319c6ee2c821d0032d8a",
+      "linux_runtime_source_sha256": "f73020af3567021c4970775f61a9d43850611ff322b8319c6ee2c821d0032d8a"
+    },
+    {
+      "path": "agent_os/interactions.py",
+      "runtime_archive_sha256": "30bf98cace401ed48ea5eda589b6f4437d6a2b275ead1b8dbfd2f3b8e4679e35",
+      "export_sha256": "30bf98cace401ed48ea5eda589b6f4437d6a2b275ead1b8dbfd2f3b8e4679e35",
+      "mac_runtime_source_sha256": "30bf98cace401ed48ea5eda589b6f4437d6a2b275ead1b8dbfd2f3b8e4679e35",
+      "linux_runtime_source_sha256": "30bf98cace401ed48ea5eda589b6f4437d6a2b275ead1b8dbfd2f3b8e4679e35"
+    },
+    {
+      "path": "agent_os/lanes/__init__.py",
+      "runtime_archive_sha256": "5384bfdb2df380b6557cc7a71d16891415bccaa87699406e236f752c6415389f",
+      "export_sha256": "5384bfdb2df380b6557cc7a71d16891415bccaa87699406e236f752c6415389f",
+      "mac_runtime_source_sha256": "5384bfdb2df380b6557cc7a71d16891415bccaa87699406e236f752c6415389f",
+      "linux_runtime_source_sha256": "5384bfdb2df380b6557cc7a71d16891415bccaa87699406e236f752c6415389f"
+    },
+    {
+      "path": "agent_os/lanes/code.py",
+      "runtime_archive_sha256": "74b1108ec4e86f77e27ddee6022dee12c62e5f8f7b15fcd827660efdb41f0b94",
+      "export_sha256": "74b1108ec4e86f77e27ddee6022dee12c62e5f8f7b15fcd827660efdb41f0b94",
+      "mac_runtime_source_sha256": "74b1108ec4e86f77e27ddee6022dee12c62e5f8f7b15fcd827660efdb41f0b94",
+      "linux_runtime_source_sha256": "74b1108ec4e86f77e27ddee6022dee12c62e5f8f7b15fcd827660efdb41f0b94"
+    },
+    {
+      "path": "agent_os/lanes/super_productivity.py",
+      "runtime_archive_sha256": "fb70db00d39c5851dd2d7485b44cfb619ac2fdd232f2bf2c5c27a7217c31ce7d",
+      "export_sha256": "fb70db00d39c5851dd2d7485b44cfb619ac2fdd232f2bf2c5c27a7217c31ce7d",
+      "mac_runtime_source_sha256": "fb70db00d39c5851dd2d7485b44cfb619ac2fdd232f2bf2c5c27a7217c31ce7d",
+      "linux_runtime_source_sha256": "fb70db00d39c5851dd2d7485b44cfb619ac2fdd232f2bf2c5c27a7217c31ce7d"
+    },
+    {
+      "path": "agent_os/openshell_evidence.py",
+      "runtime_archive_sha256": "6a2ca3196aa8e2a39bd59a8cd6f8711b5dbafc6b155cf1d1dc62a57418d86752",
+      "export_sha256": "6a2ca3196aa8e2a39bd59a8cd6f8711b5dbafc6b155cf1d1dc62a57418d86752",
+      "mac_runtime_source_sha256": "6a2ca3196aa8e2a39bd59a8cd6f8711b5dbafc6b155cf1d1dc62a57418d86752",
+      "linux_runtime_source_sha256": "6a2ca3196aa8e2a39bd59a8cd6f8711b5dbafc6b155cf1d1dc62a57418d86752"
+    },
+    {
+      "path": "agent_os/openshell_integrate.py",
+      "runtime_archive_sha256": "ecf3938dd1bf5317c7984e0ef3d955003fe3923d8503a8fedc47f76659dcdffd",
+      "export_sha256": "ecf3938dd1bf5317c7984e0ef3d955003fe3923d8503a8fedc47f76659dcdffd",
+      "mac_runtime_source_sha256": "ecf3938dd1bf5317c7984e0ef3d955003fe3923d8503a8fedc47f76659dcdffd",
+      "linux_runtime_source_sha256": "ecf3938dd1bf5317c7984e0ef3d955003fe3923d8503a8fedc47f76659dcdffd"
+    },
+    {
+      "path": "agent_os/openshell_policy.py",
+      "runtime_archive_sha256": "c6dc88e53fb5f02f0fec39ce1bb4f2edac9f0a3febe69c0538426b157361bdd4",
+      "export_sha256": "c6dc88e53fb5f02f0fec39ce1bb4f2edac9f0a3febe69c0538426b157361bdd4",
+      "mac_runtime_source_sha256": "c6dc88e53fb5f02f0fec39ce1bb4f2edac9f0a3febe69c0538426b157361bdd4",
+      "linux_runtime_source_sha256": "c6dc88e53fb5f02f0fec39ce1bb4f2edac9f0a3febe69c0538426b157361bdd4"
+    },
+    {
+      "path": "agent_os/openshell_runner.py",
+      "runtime_archive_sha256": "338f4188b2deb9dfa5bdd0b18d9e36e19fd578d30f50d8f8f82817fc4b394482",
+      "export_sha256": "338f4188b2deb9dfa5bdd0b18d9e36e19fd578d30f50d8f8f82817fc4b394482",
+      "mac_runtime_source_sha256": "338f4188b2deb9dfa5bdd0b18d9e36e19fd578d30f50d8f8f82817fc4b394482",
+      "linux_runtime_source_sha256": "338f4188b2deb9dfa5bdd0b18d9e36e19fd578d30f50d8f8f82817fc4b394482"
+    },
+    {
+      "path": "agent_os/openshell_services.py",
+      "runtime_archive_sha256": "c44bac05dd81bbf9d056c66b5ab68ff5b0023b28c399d138719cec3a9dbde60b",
+      "export_sha256": "c44bac05dd81bbf9d056c66b5ab68ff5b0023b28c399d138719cec3a9dbde60b",
+      "mac_runtime_source_sha256": "c44bac05dd81bbf9d056c66b5ab68ff5b0023b28c399d138719cec3a9dbde60b",
+      "linux_runtime_source_sha256": "c44bac05dd81bbf9d056c66b5ab68ff5b0023b28c399d138719cec3a9dbde60b"
+    },
+    {
+      "path": "agent_os/operator_channel.py",
+      "runtime_archive_sha256": "e3136217ec813312002a80f2bbdb2cdc2f1f061e6799b519dcfd29eaed328501",
+      "export_sha256": "e3136217ec813312002a80f2bbdb2cdc2f1f061e6799b519dcfd29eaed328501",
+      "mac_runtime_source_sha256": "e3136217ec813312002a80f2bbdb2cdc2f1f061e6799b519dcfd29eaed328501",
+      "linux_runtime_source_sha256": "e3136217ec813312002a80f2bbdb2cdc2f1f061e6799b519dcfd29eaed328501"
+    },
+    {
+      "path": "agent_os/pi.py",
+      "runtime_archive_sha256": "7cee9ab0a7bfba30e5be19a2ff70cce35a1f22c61d76c36ea70b5c8b9e5710f8",
+      "export_sha256": "7cee9ab0a7bfba30e5be19a2ff70cce35a1f22c61d76c36ea70b5c8b9e5710f8",
+      "mac_runtime_source_sha256": "7cee9ab0a7bfba30e5be19a2ff70cce35a1f22c61d76c36ea70b5c8b9e5710f8",
+      "linux_runtime_source_sha256": "7cee9ab0a7bfba30e5be19a2ff70cce35a1f22c61d76c36ea70b5c8b9e5710f8"
+    },
+    {
+      "path": "agent_os/policy.py",
+      "runtime_archive_sha256": "31e118b6e61d77a1546126303083fac6f8ca5bf843169a4065e15f2a7a8af982",
+      "export_sha256": "31e118b6e61d77a1546126303083fac6f8ca5bf843169a4065e15f2a7a8af982",
+      "mac_runtime_source_sha256": "31e118b6e61d77a1546126303083fac6f8ca5bf843169a4065e15f2a7a8af982",
+      "linux_runtime_source_sha256": "31e118b6e61d77a1546126303083fac6f8ca5bf843169a4065e15f2a7a8af982"
+    },
+    {
+      "path": "agent_os/resources.py",
+      "runtime_archive_sha256": "1e85865733b926dc929fd3ff0d9a8440035357ab531cc63ef0bd8b8836136835",
+      "export_sha256": "1e85865733b926dc929fd3ff0d9a8440035357ab531cc63ef0bd8b8836136835",
+      "mac_runtime_source_sha256": "1e85865733b926dc929fd3ff0d9a8440035357ab531cc63ef0bd8b8836136835",
+      "linux_runtime_source_sha256": "1e85865733b926dc929fd3ff0d9a8440035357ab531cc63ef0bd8b8836136835"
+    },
+    {
+      "path": "agent_os/sp_sync.py",
+      "runtime_archive_sha256": "7363a9fece06c9c557dba6056dc62f5672437e66048cf093b940f46a187d81c5",
+      "export_sha256": "7363a9fece06c9c557dba6056dc62f5672437e66048cf093b940f46a187d81c5",
+      "mac_runtime_source_sha256": "7363a9fece06c9c557dba6056dc62f5672437e66048cf093b940f46a187d81c5",
+      "linux_runtime_source_sha256": "7363a9fece06c9c557dba6056dc62f5672437e66048cf093b940f46a187d81c5"
+    },
+    {
+      "path": "agent_os/store.py",
+      "runtime_archive_sha256": "1faa1401ecedfd1d38011ad114fbf0e04e7f7311ff13fb5c88a46bf251e3acf1",
+      "export_sha256": "1faa1401ecedfd1d38011ad114fbf0e04e7f7311ff13fb5c88a46bf251e3acf1",
+      "mac_runtime_source_sha256": "1faa1401ecedfd1d38011ad114fbf0e04e7f7311ff13fb5c88a46bf251e3acf1",
+      "linux_runtime_source_sha256": "1faa1401ecedfd1d38011ad114fbf0e04e7f7311ff13fb5c88a46bf251e3acf1"
+    },
+    {
+      "path": "agent_os/telegram.py",
+      "runtime_archive_sha256": "8ab2d442a6cd814e71606c3fcbc9c45014af92791d2a9da83e9977902e13fbd5",
+      "export_sha256": "8ab2d442a6cd814e71606c3fcbc9c45014af92791d2a9da83e9977902e13fbd5",
+      "mac_runtime_source_sha256": "8ab2d442a6cd814e71606c3fcbc9c45014af92791d2a9da83e9977902e13fbd5",
+      "linux_runtime_source_sha256": "8ab2d442a6cd814e71606c3fcbc9c45014af92791d2a9da83e9977902e13fbd5"
+    },
+    {
+      "path": "agent_os/workflow.py",
+      "runtime_archive_sha256": "8726e6aabe7f6d7ef5cb87f50ecf61c5674f150fee617dbf1be7828837e5120d",
+      "export_sha256": "8726e6aabe7f6d7ef5cb87f50ecf61c5674f150fee617dbf1be7828837e5120d",
+      "mac_runtime_source_sha256": "8726e6aabe7f6d7ef5cb87f50ecf61c5674f150fee617dbf1be7828837e5120d",
+      "linux_runtime_source_sha256": "8726e6aabe7f6d7ef5cb87f50ecf61c5674f150fee617dbf1be7828837e5120d"
+    },
+    {
+      "path": "docker/harness/Dockerfile",
+      "runtime_archive_sha256": "93bbbf2715125a428b5f436b7c455135efe77b1b2a19b4187903a19d2f8a1be3",
+      "export_sha256": "93bbbf2715125a428b5f436b7c455135efe77b1b2a19b4187903a19d2f8a1be3",
+      "mac_runtime_source_sha256": "93bbbf2715125a428b5f436b7c455135efe77b1b2a19b4187903a19d2f8a1be3",
+      "linux_runtime_source_sha256": "93bbbf2715125a428b5f436b7c455135efe77b1b2a19b4187903a19d2f8a1be3"
+    },
+    {
+      "path": "docker/harness/README.md",
+      "runtime_archive_sha256": "d08365f2fdec3286006496fe6ef319eba34e4d54f2e6d42dd8e55603363f4783",
+      "export_sha256": "d08365f2fdec3286006496fe6ef319eba34e4d54f2e6d42dd8e55603363f4783",
+      "mac_runtime_source_sha256": "d08365f2fdec3286006496fe6ef319eba34e4d54f2e6d42dd8e55603363f4783",
+      "linux_runtime_source_sha256": "d08365f2fdec3286006496fe6ef319eba34e4d54f2e6d42dd8e55603363f4783"
+    },
+    {
+      "path": "docker/harness/aos_agent.py",
+      "runtime_archive_sha256": "561e16ef95727c050740d44a664c695acd290f7e6e311a999e27f3a514d8a554",
+      "export_sha256": "561e16ef95727c050740d44a664c695acd290f7e6e311a999e27f3a514d8a554",
+      "mac_runtime_source_sha256": "561e16ef95727c050740d44a664c695acd290f7e6e311a999e27f3a514d8a554",
+      "linux_runtime_source_sha256": "561e16ef95727c050740d44a664c695acd290f7e6e311a999e27f3a514d8a554"
+    },
+    {
+      "path": "docker/harness/aos_pi.ts",
+      "runtime_archive_sha256": "4f710242ba41e3585b329a82887399ae12419f3d89ac730cfec5df83e9e683fa",
+      "export_sha256": "4f710242ba41e3585b329a82887399ae12419f3d89ac730cfec5df83e9e683fa",
+      "mac_runtime_source_sha256": "4f710242ba41e3585b329a82887399ae12419f3d89ac730cfec5df83e9e683fa",
+      "linux_runtime_source_sha256": "4f710242ba41e3585b329a82887399ae12419f3d89ac730cfec5df83e9e683fa"
+    },
+    {
+      "path": "pyproject.toml",
+      "runtime_archive_sha256": "16f6ec180f36ec0eeb9b321bdb91fe1057456fc819c2e9ea6f0c39aeec53431a",
+      "export_sha256": "16f6ec180f36ec0eeb9b321bdb91fe1057456fc819c2e9ea6f0c39aeec53431a",
+      "mac_runtime_source_sha256": "16f6ec180f36ec0eeb9b321bdb91fe1057456fc819c2e9ea6f0c39aeec53431a",
+      "linux_runtime_source_sha256": "16f6ec180f36ec0eeb9b321bdb91fe1057456fc819c2e9ea6f0c39aeec53431a"
+    },
+    {
+      "path": "scripts/release_matrix.py",
+      "runtime_archive_sha256": "c88b22f1c2ded53c234d64c80c65b2c6e176857aaf84514a971548b60e13596f",
+      "export_sha256": "c88b22f1c2ded53c234d64c80c65b2c6e176857aaf84514a971548b60e13596f",
+      "mac_runtime_source_sha256": "c88b22f1c2ded53c234d64c80c65b2c6e176857aaf84514a971548b60e13596f",
+      "linux_runtime_source_sha256": "c88b22f1c2ded53c234d64c80c65b2c6e176857aaf84514a971548b60e13596f"
+    },
+    {
+      "path": "uv.lock",
+      "runtime_archive_sha256": "be00023b64b7eb542fbdbb2e2c944200e07f6acf272a99e1e2077af16cf2f4d1",
+      "export_sha256": "be00023b64b7eb542fbdbb2e2c944200e07f6acf272a99e1e2077af16cf2f4d1",
+      "mac_runtime_source_sha256": "be00023b64b7eb542fbdbb2e2c944200e07f6acf272a99e1e2077af16cf2f4d1",
+      "linux_runtime_source_sha256": "be00023b64b7eb542fbdbb2e2c944200e07f6acf272a99e1e2077af16cf2f4d1"
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+mode=stopguard events=74 non-json-lines=0 harness.rc=0
+init model=claude-sonnet-5-5 permissionMode=dontAsk
+result subtype=success is_error=False num_turns=11 duration_ms=20955 cost_usd=0.07357929999999999
+models by context: {"desk": ["claude-sonnet-5-5"]}
+
+S1 the Stop guard reads the -statiker.md fixture under cwd /sandbox/repo and blocks
+  hook_started Stop x18; hook_response with decision block x9
+  event 19: exit=0 stdout={"decision": "block", "reason": "P16 stop-guard: unattended statiker desk work is owed at `/sandbox/repo/.clippy/runs/2026-10-14-probe-statiker.md` (last A-line [BIT]; no PENDING blocking). A report is no terminus \u2014 the run's own turn-end rule (SKILL.md) names a dispatched round awaiting return, a hold the desk cannot clear, an operator-owned decision, or the close as the only legitimate stop... [557 chars]
+  event 26: exit=0 stdout={"decision": "block", "reason": "P16 stop-guard: unattended statiker desk work is owed at `/sandbox/repo/.clippy/runs/2026-10-14-probe-statiker.md` (last A-line [BIT]; no PENDING blocking). A report is no terminus \u2014 the run's own turn-end rule (SKILL.md) names a dispatched round awaiting return, a hold the desk cannot clear, an operator-owned decision, or the close as the only legitimate stop... [557 chars]
+  => PASS
+
+S2 the block reaches the model as Stop hook feedback
+  event 20 user: Stop hook feedback:\nP16 stop-guard: unattended statiker desk work is owed at `/sandbox/repo/.clippy/runs/2026-10-14-probe-statiker.md` (last A-line [BIT]; no PENDING blocking). A report is no terminus — the run's own turn-end rule (SKILL.md) names a dispatched round awaiting return, a hold the desk... [538 chars]
+  event 23 assistant: A stop hook blocked me: "P16 stop-guard: unattended statiker desk work is owed at `/sandbox/repo/.clippy/runs/2026-10-14-probe-statiker.md` (last A-line [BIT]; no PENDING blocking)." As instructed, I'm not editing any file or starting other work.
+  => PASS
+
+S3 the run ends (the guard keeps blocking; the turn cap ends it)
+  result subtype=success is_error=False num_turns=11 cost_usd=0.07357929999999999 harness.rc=0
+  => PASS
+
+S4 the one-step task ran
+  exec /sandbox/repo/stopguard-ran.txt: stopguard-ran
+  => PASS
+
+secret scan over 4 downloaded files, labels ['claude_oauth_token', 'codex_access_token', 'codex_id_token', 'codex_refresh_token'] (values never printed):
+  exec-reads.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (7580 bytes)
+  harness.err: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (0 bytes)
+  harness.out: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (47472 bytes)
+  harness.rc: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (2 bytes)
+  total hits: 0; positive control (planted string in a copy of the first file): 1
+
+secret scan over the 12 evidence files (values never printed):
+  checks.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  claude-settings.json: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  effective-policy.yaml: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  exec-reads.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  gateway-denied.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  gateway-status.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  main-script.sh: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  prompt.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  run-summary.json: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  sandboxes-after.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  sandboxes-before.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  stream-events.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  total hits: 0; positive control: 1

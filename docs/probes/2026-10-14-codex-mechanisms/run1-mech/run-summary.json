@@ -1,0 +1,86 @@
+{
+  "name": "cxm-mech",
+  "mode": "mech",
+  "phrases": {
+    "user-skill": "PHRASE-USER-09150e",
+    "home-skill": "PHRASE-HOME-0df55d",
+    "repo-skill": "PHRASE-REPO-4fb6f0"
+  },
+  "codeword": "CODEWORD-53af7f",
+  "command": "CODEX_HOME=/sandbox/codex-home codex exec --json --skip-git-repo-check --sandbox danger-full-access --dangerously-bypass-hook-trust -c approval_policy=\"never\" -c features.hooks=true -c features.multi_agent=true -c features.plugins=true -c features.apps=false \"$(cat /sandbox/prompt.txt)\"",
+  "effective_policy_problems": [],
+  "harness_seconds": 96.9,
+  "codex_auth_unchanged": false,
+  "gateway_denied_lines": 14,
+  "harness_rc": "0",
+  "timeline": [
+    {
+      "t": 1792015101.938,
+      "event": "sandbox.created",
+      "name": "cxm-mech",
+      "image": "aos-harness:comms"
+    },
+    {
+      "t": 1792015102.036,
+      "event": "policy.effective",
+      "problems": []
+    },
+    {
+      "t": 1792015102.337,
+      "event": "fixtures.installed"
+    },
+    {
+      "t": 1792015102.576,
+      "event": "codex_auth.uploaded"
+    },
+    {
+      "t": 1792015102.739,
+      "event": "prompt.uploaded"
+    },
+    {
+      "t": 1792015103.312,
+      "event": "job.released",
+      "bytes": 219977
+    },
+    {
+      "t": 1792015105.952,
+      "event": "harness.started"
+    },
+    {
+      "t": 1792015202.856,
+      "event": "harness.finished",
+      "seconds": 96.9
+    },
+    {
+      "t": 1792015213.709,
+      "event": "worktree_step.done",
+      "rc": 0
+    },
+    {
+      "t": 1792015213.984,
+      "event": "exec.reads_done",
+      "codex_auth_unchanged": false
+    },
+    {
+      "t": 1792015214.917,
+      "event": "downloads.done",
+      "files": [
+        "exec-reads.txt",
+        "harness.err",
+        "harness.out",
+        "harness.rc",
+        "probe-report.md"
+      ]
+    },
+    {
+      "t": 1792015214.961,
+      "event": "gateway.log_saved",
+      "lines": 664
+    },
+    {
+      "t": 1792015215.223,
+      "event": "sandbox.deleted",
+      "gone": true
+    }
+  ]
+}

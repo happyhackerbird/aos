@@ -1,0 +1,86 @@
+### 1. the agent dir's server starts under the runner's flags; its tool is not offered by default
+== plain rc=0
+start argv=['plain']
+recv initialize
+recv notifications/initialized
+recv tools/list
+POST /v1/chat/completions stream=True tools=['read', 'bash', 'edit', 'eval', 'glob', 'grep', 'task', 'wait', 'todo', 'web_search', 'write']
+  t=1792164913 tool results=[]
+
+== allow rc=0
+start argv=['allow']
+recv initialize
+recv notifications/initialized
+recv tools/list
+POST /v1/chat/completions stream=True tools=['read', 'bash', 'edit', 'eval', 'glob', 'grep', 'wait', 'todo', 'write', 'web_search']
+  t=1792164914 tool results=[]
+
+### 2-3. registered names (an unknown --tools name lists them); named, the tool is offered
+Other registered tools: goal, init_experiment, run_experiment, log_experiment, update_notes, mcp__stub_ping.
+== named rc=0
+start argv=['named']
+recv initialize
+recv notifications/initialized
+recv tools/list
+POST /v1/chat/completions stream=True tools=['read', 'bash', 'edit', 'eval', 'glob', 'grep', 'wait', 'todo', 'write', 'web_search', 'mcp__stub_ping']
+  t=1792164918 tool results=[]
+
+Other registered tools: goal, init_experiment, run_experiment, log_experiment, update_notes, mcp__aos_ask, mcp__aos_declare, mcp__aos_inbox, mcp__aos_propose, mcp__aos_reply, mcp__aos_wait.
+== aosnamed rc=0
+(no stub log)
+POST /v1/chat/completions stream=True tools=['read', 'bash', 'edit', 'eval', 'glob', 'grep', 'wait', 'todo', 'write', 'web_search', 'mcp__aos_ask', 'mcp__aos_declare', 'mcp__aos_inbox', 'mcp__aos_propose', 'mcp__aos_reply', 'mcp__aos_wait']
+  t=1792164921 tool results=[]
+
+### 5. the repository's MCP files: default, then enableProjectConfig false
+start argv=['REPO .omp/mcp.json']
+start argv=['REPO .claude/mcp.json']
+start argv=['USER agentdir']
+start argv=['REPO mcp.json']
+start argv=['REPO .cursor/mcp.json']
+start argv=['REPO .mcp.json']
+start argv=['USER agentdir']
+### 5b. a repository server named like the agent dir's: which one starts
+start argv=['REPO .claude/mcp.json']
+start argv=['REPO mcp.json']
+start argv=['REPO .cursor/mcp.json']
+start argv=['REPO .mcp.json']
+start argv=['REPO .omp/mcp.json']
+### 6. the MCP call timeout: 5 s, 130 s, 130 s with the server's timeout 1000000
+== sleep5 rc=0
+start argv=['sleep5']
+recv initialize
+recv notifications/initialized
+recv tools/list
+recv tools/call
+call start t=1792164929
+call end t=1792164934
+POST /v1/chat/completions stream=True tools=['read', 'bash', 'mcp__stub_ping']
+  t=1792164929 tool results=[]
+POST /v1/chat/completions stream=True tools=['read', 'bash', 'mcp__stub_ping']
+  t=1792164934 tool results=['pong']
+
+== sleep130 rc=0
+start argv=['sleep130']
+recv initialize
+recv notifications/initialized
+recv tools/list
+recv tools/call
+call start t=1792164936
+POST /v1/chat/completions stream=True tools=['read', 'bash', 'mcp__stub_ping']
+  t=1792164936 tool results=[]
+POST /v1/chat/completions stream=True tools=['read', 'bash', 'mcp__stub_ping']
+  t=1792164966 tool results=['MCP failure\nserver: stub\ntool: stub_ping\ntransport: stdio\nstage: receive\nfailure: timeout\nretryable: no\nmessage: Request timeout after 30000ms\nnext: Check serve']
+
+== timeout130 rc=0
+start argv=['t']
+recv initialize
+recv notifications/initialized
+recv tools/list
+recv tools/call
+call start t=1792164968
+call end t=1792165097
+POST /v1/chat/completions stream=True tools=['read', 'bash', 'mcp__stub_ping']
+  t=1792164968 tool results=[]
+POST /v1/chat/completions stream=True tools=['read', 'bash', 'mcp__stub_ping']
+  t=1792165097 tool results=['pong']
+

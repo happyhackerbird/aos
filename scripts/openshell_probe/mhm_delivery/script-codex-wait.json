@@ -1,0 +1,5 @@
+[
+  {"call": {"name": "aos_ask", "namespace": "mcp__aos", "arguments": "{\"to\": \"operator\", \"text\": \"May I proceed?\"}"}},
+  {"call": {"name": "aos_wait", "namespace": "mcp__aos", "arguments": "{\"id\": \"AO-7-i1\", \"timeout_s\": 130}"}},
+  {"text": "All done. Final report: asked and waited."}
+]

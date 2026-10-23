@@ -1,0 +1,84 @@
+{
+  "name": "stkm-stopguard",
+  "mode": "stopguard",
+  "model": "sonnet",
+  "budget_usd": 3.0,
+  "max_turns": 12,
+  "codeword": "CODEWORD-551c6e",
+  "effective_policy_problems": [],
+  "harness_seconds": 25.4,
+  "codex_auth_unchanged": true,
+  "gateway_denied_lines": 0,
+  "harness_rc": "0",
+  "timeline": [
+    {
+      "t": 1792012704.048,
+      "event": "sandbox.created",
+      "name": "stkm-stopguard",
+      "image": "aos-harness:comms"
+    },
+    {
+      "t": 1792012704.147,
+      "event": "policy.effective",
+      "problems": []
+    },
+    {
+      "t": 1792012704.396,
+      "event": "plugins.extracted"
+    },
+    {
+      "t": 1792012704.61,
+      "event": "codex_auth.uploaded"
+    },
+    {
+      "t": 1792012704.939,
+      "event": "settings_prompt.uploaded"
+    },
+    {
+      "t": 1792012705.255,
+      "event": "job.released",
+      "bytes": 335967
+    },
+    {
+      "t": 1792012707.461,
+      "event": "harness.started"
+    },
+    {
+      "t": 1792012732.826,
+      "event": "harness.finished",
+      "seconds": 25.4
+    },
+    {
+      "t": 1792012733.062,
+      "event": "exec.reads_done",
+      "codex_auth_unchanged": true
+    },
+    {
+      "t": 1792012733.778,
+      "event": "download.failed",
+      "path": "/sandbox/repo/probe-report.md",
+      "rc": 1,
+      "stderr": "de-agent-os/81b652c6-9a92-402d-84a9-5c69da6d65e8/scratchpad/downloads/stkm-stopguard/probe-report.md\nrealpath: /sandbox/repo/probe-report.md: No such file or directory\nError:   \u00d7 failed to resolve sandbox source path '/sandbox/repo/probe-report.md'\n  \u2570\u2500\u25b6 ssh probe exited with status exit status: 1\n\n"
+    },
+    {
+      "t": 1792012734.369,
+      "event": "downloads.done",
+      "files": [
+        "exec-reads.txt",
+        "harness.err",
+        "harness.out",
+        "harness.rc"
+      ]
+    },
+    {
+      "t": 1792012734.431,
+      "event": "gateway.log_saved",
+      "lines": 292
+    },
+    {
+      "t": 1792012734.678,
+      "event": "sandbox.deleted",
+      "gone": true
+    }
+  ]
+}

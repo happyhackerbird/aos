@@ -1,0 +1,758 @@
+{
+  "platform": "macOS with Colima aarch64",
+  "runtime_source": "9fe5d741e32da230cf94af3fcc4cd50b70906ca4",
+  "image_inspect_id": "sha256:d7c9f7911e31fe98283171fc672a18a2a1af249faff48cc2a39bbdc647bbe684",
+  "image_versions": {
+    "node": "v24.21.0",
+    "npm": "11.19.0",
+    "claude": "2.1.296 (Claude Code)",
+    "codex": "codex-cli 0.162.1",
+    "pi": "1.1.0",
+    "omp": "omp/18.8.3",
+    "uv": "uv 0.13.0 (aarch64-unknown-linux-gnu)",
+    "python": "Python 3.12.15",
+    "playwright": "Version 1.63.0",
+    "poetry": "Poetry (version 2.1.3)",
+    "chromium": "Chromium 155.0.8059.79 built on Debian GNU/Linux 12 (bookworm)",
+    "postgresql": "psql (PostgreSQL) 15.19 (Debian 15.19-0+deb12u1)",
+    "tmux": "tmux 3.3a",
+    "debian": "12.15",
+    "base": "node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20"
+  },
+  "configured_models": {
+    "claude": "claude-opus-5-5",
+    "pi": "gpt-6.1-sol",
+    "omp": "openai-codex/gpt-6.1-sol",
+    "codex": "CLI default; actual model unverified"
+  },
+  "cells": [
+    {
+      "fixture": "demo-app",
+      "harness": "claude",
+      "scenario": "success",
+      "task": "AO-2",
+      "runs": [
+        "AO-2-r1"
+      ],
+      "status": "review",
+      "verdict": "pass",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "2e4736f0b0c18085ff1568cad977c9ae6817350b",
+      "branch_tip": "2e4736f0b0c18085ff1568cad977c9ae6817350b",
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "demo-app",
+      "harness": "claude",
+      "scenario": "failed-verification",
+      "task": "AO-3",
+      "runs": [
+        "AO-3-r1"
+      ],
+      "status": "failed",
+      "verdict": "fail",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "c247ac39fb33b74d64bb71be40354792358f9c30",
+      "branch_tip": "c247ac39fb33b74d64bb71be40354792358f9c30",
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "demo-app",
+      "harness": "claude",
+      "scenario": "interruption",
+      "task": "AO-4",
+      "runs": [
+        "AO-4-r1"
+      ],
+      "status": "cancelled",
+      "verdict": null,
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": null,
+      "branch_tip": null,
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "demo-app",
+      "harness": "claude",
+      "scenario": "retry",
+      "task": "AO-5",
+      "runs": [
+        "AO-5-r1",
+        "AO-5-r2"
+      ],
+      "status": "review",
+      "verdict": "pass",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "70de65a7718d4786f1e4a387049337849f3a471c",
+      "branch_tip": "70de65a7718d4786f1e4a387049337849f3a471c",
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "demo-app",
+      "harness": "claude",
+      "scenario": "runner-kill",
+      "task": "AO-6",
+      "runs": [
+        "AO-6-r1"
+      ],
+      "status": "blocked",
+      "verdict": null,
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": null,
+      "branch_tip": null,
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "demo-app",
+      "harness": "codex",
+      "scenario": "success",
+      "task": "AO-7",
+      "runs": [
+        "AO-7-r1"
+      ],
+      "status": "review",
+      "verdict": "pass",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "b4969d87d0a21a6ac1cf28d5c32f3432dafbd84a",
+      "branch_tip": "b4969d87d0a21a6ac1cf28d5c32f3432dafbd84a",
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "demo-app",
+      "harness": "codex",
+      "scenario": "failed-verification",
+      "task": "AO-8",
+      "runs": [
+        "AO-8-r1"
+      ],
+      "status": "failed",
+      "verdict": "fail",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "4d4d8bc9fcb1f7af6af4b2c186d318d80eea72c5",
+      "branch_tip": "4d4d8bc9fcb1f7af6af4b2c186d318d80eea72c5",
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "demo-app",
+      "harness": "codex",
+      "scenario": "interruption",
+      "task": "AO-9",
+      "runs": [
+        "AO-9-r1"
+      ],
+      "status": "cancelled",
+      "verdict": null,
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": null,
+      "branch_tip": null,
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "demo-app",
+      "harness": "codex",
+      "scenario": "retry",
+      "task": "AO-10",
+      "runs": [
+        "AO-10-r1",
+        "AO-10-r2"
+      ],
+      "status": "review",
+      "verdict": "pass",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "708f3a373734222393aaf2c97d60b402e1368dc3",
+      "branch_tip": "708f3a373734222393aaf2c97d60b402e1368dc3",
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "demo-app",
+      "harness": "codex",
+      "scenario": "runner-kill",
+      "task": "AO-11",
+      "runs": [
+        "AO-11-r1"
+      ],
+      "status": "blocked",
+      "verdict": null,
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": null,
+      "branch_tip": null,
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "claude",
+      "scenario": "success",
+      "task": "AO-12",
+      "runs": [
+        "AO-12-r1"
+      ],
+      "status": "failed",
+      "verdict": null,
+      "outcome": "FAIL",
+      "sandbox_gone": true,
+      "result_commit": null,
+      "branch_tip": null,
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "claude",
+      "scenario": "failed-verification",
+      "task": "AO-13",
+      "runs": [
+        "AO-13-r1"
+      ],
+      "status": "failed",
+      "verdict": "fail",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "dd78d0070324ce79a13e33e533547992ed25b1ca",
+      "branch_tip": "dd78d0070324ce79a13e33e533547992ed25b1ca",
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "claude",
+      "scenario": "interruption",
+      "task": "AO-14",
+      "runs": [
+        "AO-14-r1"
+      ],
+      "status": "cancelled",
+      "verdict": null,
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": null,
+      "branch_tip": null,
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "claude",
+      "scenario": "retry",
+      "task": "AO-15",
+      "runs": [
+        "AO-15-r1",
+        "AO-15-r2"
+      ],
+      "status": "review",
+      "verdict": "pass",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "165d3e11e00c42264dfb0c0a675839801a933a4b",
+      "branch_tip": "165d3e11e00c42264dfb0c0a675839801a933a4b",
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "claude",
+      "scenario": "runner-kill",
+      "task": "AO-16",
+      "runs": [
+        "AO-16-r1"
+      ],
+      "status": "blocked",
+      "verdict": null,
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": null,
+      "branch_tip": null,
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "codex",
+      "scenario": "success",
+      "task": "AO-17",
+      "runs": [
+        "AO-17-r1"
+      ],
+      "status": "review",
+      "verdict": "pass",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "2ec16c3899550a5638ca2c830b8c76989c79042b",
+      "branch_tip": "2ec16c3899550a5638ca2c830b8c76989c79042b",
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "codex",
+      "scenario": "failed-verification",
+      "task": "AO-18",
+      "runs": [
+        "AO-18-r1"
+      ],
+      "status": "failed",
+      "verdict": "fail",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "cce9ada4221e01f270901efa419bd6d23dab38b6",
+      "branch_tip": "cce9ada4221e01f270901efa419bd6d23dab38b6",
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "codex",
+      "scenario": "interruption",
+      "task": "AO-19",
+      "runs": [
+        "AO-19-r1"
+      ],
+      "status": "cancelled",
+      "verdict": null,
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": null,
+      "branch_tip": null,
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "codex",
+      "scenario": "retry",
+      "task": "AO-20",
+      "runs": [
+        "AO-20-r1",
+        "AO-20-r2"
+      ],
+      "status": "review",
+      "verdict": "pass",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "d7af3098f8dcf767643b46a640790d144afac116",
+      "branch_tip": "d7af3098f8dcf767643b46a640790d144afac116",
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "codex",
+      "scenario": "runner-kill",
+      "task": "AO-21",
+      "runs": [
+        "AO-21-r1"
+      ],
+      "status": "blocked",
+      "verdict": null,
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": null,
+      "branch_tip": null,
+      "bus_group": "supported"
+    },
+    {
+      "fixture": "demo-app",
+      "harness": "pi",
+      "scenario": "success",
+      "task": "AO-1",
+      "runs": [
+        "AO-1-r1"
+      ],
+      "status": "review",
+      "verdict": "pass",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "75d6e63cafbd3ba3851b6a59c3859e3813288749",
+      "branch_tip": "75d6e63cafbd3ba3851b6a59c3859e3813288749",
+      "bus_group": "pi"
+    },
+    {
+      "fixture": "demo-app",
+      "harness": "pi",
+      "scenario": "failed-verification",
+      "task": "AO-2",
+      "runs": [
+        "AO-2-r1"
+      ],
+      "status": "failed",
+      "verdict": "fail",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "66854dc14ed991e245232146c669b5bbb9e8ac1d",
+      "branch_tip": "66854dc14ed991e245232146c669b5bbb9e8ac1d",
+      "bus_group": "pi"
+    },
+    {
+      "fixture": "demo-app",
+      "harness": "pi",
+      "scenario": "interruption",
+      "task": "AO-3",
+      "runs": [
+        "AO-3-r1"
+      ],
+      "status": "cancelled",
+      "verdict": null,
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": null,
+      "branch_tip": null,
+      "bus_group": "pi"
+    },
+    {
+      "fixture": "demo-app",
+      "harness": "pi",
+      "scenario": "retry",
+      "task": "AO-4",
+      "runs": [
+        "AO-4-r1",
+        "AO-4-r2"
+      ],
+      "status": "review",
+      "verdict": "pass",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "12b29718685c608df4d1d9b33e6d6ba2ef0e1f17",
+      "branch_tip": "12b29718685c608df4d1d9b33e6d6ba2ef0e1f17",
+      "bus_group": "pi"
+    },
+    {
+      "fixture": "demo-app",
+      "harness": "pi",
+      "scenario": "runner-kill",
+      "task": "AO-5",
+      "runs": [
+        "AO-5-r1"
+      ],
+      "status": "blocked",
+      "verdict": null,
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": null,
+      "branch_tip": null,
+      "bus_group": "pi"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "pi",
+      "scenario": "success",
+      "task": "AO-6",
+      "runs": [
+        "AO-6-r1"
+      ],
+      "status": "review",
+      "verdict": "pass",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "4badb73778b623b8c24e5ff86be5d6d311a9eac2",
+      "branch_tip": "4badb73778b623b8c24e5ff86be5d6d311a9eac2",
+      "bus_group": "pi"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "pi",
+      "scenario": "failed-verification",
+      "task": "AO-7",
+      "runs": [
+        "AO-7-r1"
+      ],
+      "status": "failed",
+      "verdict": "fail",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "d301341e9d3beada6a485ab95cbc8d22615a7d08",
+      "branch_tip": "d301341e9d3beada6a485ab95cbc8d22615a7d08",
+      "bus_group": "pi"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "pi",
+      "scenario": "interruption",
+      "task": "AO-8",
+      "runs": [
+        "AO-8-r1"
+      ],
+      "status": "cancelled",
+      "verdict": null,
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": null,
+      "branch_tip": null,
+      "bus_group": "pi"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "pi",
+      "scenario": "retry",
+      "task": "AO-9",
+      "runs": [
+        "AO-9-r1",
+        "AO-9-r2"
+      ],
+      "status": "review",
+      "verdict": "pass",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "69b7e849e741688ed1d3eb6a9728c7f7f00ecb40",
+      "branch_tip": "69b7e849e741688ed1d3eb6a9728c7f7f00ecb40",
+      "bus_group": "pi"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "pi",
+      "scenario": "runner-kill",
+      "task": "AO-10",
+      "runs": [
+        "AO-10-r1"
+      ],
+      "status": "blocked",
+      "verdict": null,
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": null,
+      "branch_tip": null,
+      "bus_group": "pi"
+    },
+    {
+      "fixture": "demo-app",
+      "harness": "omp",
+      "scenario": "success",
+      "task": "AO-1",
+      "runs": [
+        "AO-1-r1"
+      ],
+      "status": "review",
+      "verdict": "pass",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "d2661a6a2469162132d5053f7726d58f9deaaf47",
+      "branch_tip": "d2661a6a2469162132d5053f7726d58f9deaaf47",
+      "bus_group": "omp"
+    },
+    {
+      "fixture": "demo-app",
+      "harness": "omp",
+      "scenario": "failed-verification",
+      "task": "AO-2",
+      "runs": [
+        "AO-2-r1"
+      ],
+      "status": "failed",
+      "verdict": "fail",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "ac4977a02fc2691ea69fe9cc428957aa6d761f86",
+      "branch_tip": "ac4977a02fc2691ea69fe9cc428957aa6d761f86",
+      "bus_group": "omp"
+    },
+    {
+      "fixture": "demo-app",
+      "harness": "omp",
+      "scenario": "interruption",
+      "task": "AO-3",
+      "runs": [
+        "AO-3-r1"
+      ],
+      "status": "cancelled",
+      "verdict": null,
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": null,
+      "branch_tip": null,
+      "bus_group": "omp"
+    },
+    {
+      "fixture": "demo-app",
+      "harness": "omp",
+      "scenario": "retry",
+      "task": "AO-4",
+      "runs": [
+        "AO-4-r1",
+        "AO-4-r2"
+      ],
+      "status": "review",
+      "verdict": "pass",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "039a2248ef6f1f4d03e141eea8a1afdabea3115d",
+      "branch_tip": "039a2248ef6f1f4d03e141eea8a1afdabea3115d",
+      "bus_group": "omp"
+    },
+    {
+      "fixture": "demo-app",
+      "harness": "omp",
+      "scenario": "runner-kill",
+      "task": "AO-5",
+      "runs": [
+        "AO-5-r1"
+      ],
+      "status": "blocked",
+      "verdict": null,
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": null,
+      "branch_tip": null,
+      "bus_group": "omp"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "omp",
+      "scenario": "success",
+      "task": "AO-6",
+      "runs": [
+        "AO-6-r1"
+      ],
+      "status": "review",
+      "verdict": "pass",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "2d4d2a155cf23483048697a8123792c0754de2fe",
+      "branch_tip": "2d4d2a155cf23483048697a8123792c0754de2fe",
+      "bus_group": "omp"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "omp",
+      "scenario": "failed-verification",
+      "task": "AO-7",
+      "runs": [
+        "AO-7-r1"
+      ],
+      "status": "failed",
+      "verdict": "fail",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "65d80a99dd81a01b6bb8b97754c724c815287dd5",
+      "branch_tip": "65d80a99dd81a01b6bb8b97754c724c815287dd5",
+      "bus_group": "omp"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "omp",
+      "scenario": "interruption",
+      "task": "AO-8",
+      "runs": [
+        "AO-8-r1"
+      ],
+      "status": "cancelled",
+      "verdict": null,
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": null,
+      "branch_tip": null,
+      "bus_group": "omp"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "omp",
+      "scenario": "retry",
+      "task": "AO-9",
+      "runs": [
+        "AO-9-r1",
+        "AO-9-r2"
+      ],
+      "status": "review",
+      "verdict": "pass",
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": "d4ed0566663f0d62f8c1c7cc4ab9c4f09c389c49",
+      "branch_tip": "d4ed0566663f0d62f8c1c7cc4ab9c4f09c389c49",
+      "bus_group": "omp"
+    },
+    {
+      "fixture": "aos-example",
+      "harness": "omp",
+      "scenario": "runner-kill",
+      "task": "AO-10",
+      "runs": [
+        "AO-10-r1"
+      ],
+      "status": "blocked",
+      "verdict": null,
+      "outcome": "PASS",
+      "sandbox_gone": true,
+      "result_commit": null,
+      "branch_tip": null,
+      "bus_group": "omp"
+    }
+  ],
+  "failures": [
+    {
+      "fixture": "aos-example",
+      "harness": "claude",
+      "scenario": "success",
+      "task": "AO-12",
+      "run": "AO-12-r1",
+      "error": "harness exit 1: no stderr",
+      "cause": "API reachability/DNS diagnostic observed; underlying cause unresolved, no green-seeking rerun",
+      "retained_final_message": "API Error: Can't reach the API server \u2014 check your internet or DNS (ENOTFOUND)",
+      "additional_observation": "The same run report records six denied connections to 198.18.0.2:443; causality with ENOTFOUND is not established."
+    }
+  ],
+  "readiness": {
+    "automatic_reachable": "passed in supported matrix",
+    "pull_reachable": "passed",
+    "automatic_unreachable": "refused before prompt with host bus healthy",
+    "pull_unreachable": "refused before prompt with host bus healthy"
+  },
+  "merged_acceptance": {
+    "fixture": "aos-example",
+    "task": "AO-17",
+    "status": "passed",
+    "head_sha": "2ec16c3899550a5638ca2c830b8c76989c79042b",
+    "base_sha": "b75f6a67d980c7c21aa3184dcb21dae2fd2d5abe",
+    "pytest_passed": 10,
+    "browser_database_checks_passed": 4,
+    "fresh_sandbox": true
+  },
+  "cleanup": {
+    "recorded_owned_pids_absent": 62,
+    "owned_sandboxes": 0,
+    "owned_containers": 0,
+    "transient_run_credentials": 0,
+    "bus_listener_stopped": true,
+    "candidate_source_files_verified": 38
+  },
+  "production_health": [
+    {
+      "phase": "before",
+      "endpoints": [
+        {
+          "port": 8010,
+          "http": 200,
+          "ok": true
+        },
+        {
+          "port": 8011,
+          "http": 200,
+          "ok": false
+        }
+      ]
+    },
+    {
+      "phase": "after",
+      "endpoints": [
+        {
+          "port": 8010,
+          "http": 200,
+          "ok": true
+        },
+        {
+          "port": 8011,
+          "http": 200,
+          "ok": false
+        }
+      ]
+    }
+  ],
+  "qualifications": [
+    "Initial AO-1-r1 was interrupted to correct omitted explicit AOS git identity; original evidence retained.",
+    "The supported matrix has one unexplained failure; there is no all-green supported-platform claim.",
+    "Scenario PASS means named predicates, not absence of every runner diagnostic.",
+    "Cancelled tasks remain terminal; retry uses a separate SIGTERM-blocked task and its second run.",
+    "Codex actual default model is unverified.",
+    "HTTP 200 at port 8011 had ok=false before and after; this is not clean-health proof.",
+    "Supported fixtures predate the navigation-only fixture README change; later matrices use the pinned source archive.",
+    "Archive-based driver metadata has no Git SHA; provenance is supplied by the retained archive hash."
+  ],
+  "source_comparison_record": "2026-10-21-release-source-comparison.json"
+}

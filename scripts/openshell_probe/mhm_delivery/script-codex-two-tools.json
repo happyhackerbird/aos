@@ -1,0 +1,5 @@
+[
+  {"call": {"name": "exec_command", "arguments": "{\"cmd\": \"sleep 6; echo one\"}"}},
+  {"call": {"name": "exec_command", "arguments": "{\"cmd\": \"sleep 6; echo two\"}"}},
+  {"text": "All done. Final report: two commands ran, nothing else to report."}
+]

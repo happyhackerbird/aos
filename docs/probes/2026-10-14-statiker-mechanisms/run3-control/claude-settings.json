@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "allow": [
+      "Bash(*)",
+      "Read(*)",
+      "Edit(*)",
+      "Write(*)",
+      "Agent(*)"
+    ],
+    "deny": [
+      "WebFetch",
+      "WebSearch",
+      "mcp__*"
+    ]
+  },
+  "sandbox": {
+    "enabled": false
+  },
+  "disableAllHooks": true
+}

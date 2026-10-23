@@ -1,0 +1,14 @@
+name: Isolated regression checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run as UID 1000 in a verified private PID namespace
+        run: sh scripts/test-isolated.sh

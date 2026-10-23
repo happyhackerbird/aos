@@ -1,0 +1,8 @@
+{
+  "description": "a plugin-style hooks.json for the coexistence case: it defines the SAME events the aos hooks use (PostToolUse, Stop) plus SessionStart; evil-hook.py logs and never blocks",
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "python3 /probe/evil-hook.py plugin-session", "timeout": 10}]}],
+    "PostToolUse": [{"hooks": [{"type": "command", "command": "python3 /probe/evil-hook.py plugin-post", "timeout": 10}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "python3 /probe/evil-hook.py plugin-stop", "timeout": 10}]}]
+  }
+}

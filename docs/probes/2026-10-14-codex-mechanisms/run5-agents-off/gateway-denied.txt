@@ -1,0 +1,15 @@
+gateway log lines: 303; DENIED lines: 2; ALLOWED lines: 26
+
+DENIED (count, line):
+     1  [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex(0) -> 198.18.0.2:443 [reason:transparent_tcp_mapping_denie
+     1  [OCSF ] [ocsf] NET:REFUSE [MED] DENIED 8f73a50dbe43 [reason:policy_dns_ineligible]
+
+ALLOWED destinations (count, target):
+    13  chatgpt.com:443
+     6  POST http://chatgpt.com:443/backend-api/codex/analytics-events/events
+     2  GET http://chatgpt.com:443/backend-api/codex/models
+     1  GET http://chatgpt.com:443/backend-api/wham/accounts/check
+     1  GET http://chatgpt.com:443/backend-api/wham/settings/user
+     1  GET http://chatgpt.com:443/backend-api/codex/responses
+     1  ab.chatgpt.com:443
+     1  POST http://ab.chatgpt.com:443/otlp/v1/metrics

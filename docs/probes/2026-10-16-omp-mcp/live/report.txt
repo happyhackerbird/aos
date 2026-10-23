@@ -1,0 +1,20 @@
+sandbox prefix a1b for bus 127.0.0.1:8017
+policy main@b75f6a67d980 rendered for colima-mac; job copy 146 files
+git identity: the host's user.name and user.email
+omp 18.8.3 (omp) has every required flag
+harness pi exited 0 after 61 s
+omp final message:
+Created `FRUIT.md` with the operator’s fruit answer and inbox note. Commit: `75eae56` (`Add operator-selected fruit`).
+
+- Request ID: `AO-1-i1`
+- Answer: `FRUIT-4f577568`
+- Inbox messages read: `operator-i1` requested `Note: NOTE-6829136a`; the pre-commit and final inbox reads were empty.
+- Both requested `grep -q` acceptance checks passed.
+- App Launch/Doctor/Drive were not run; this text-file change does not alter app behavior.
+
+Evidence directory: evidence/20261016T154055Z
+acceptance ran in a fresh sandbox a1b-ao-1-r1-acc under the acceptance policy
+network: 192.168.5.2:8017 x8, chatgpt.com:443 x2, denied x15, denied 198.18.0.3:443 x1, denied api.commandcode.ai x1, denied api.commandcode.ai:443 x1, denied api.kilo.ai x1, denied api.kilo.ai:443 x1, denied api.venice.ai x1, denied api.venice.ai:443 x1, denied catalog.stencil.so x1, denied catalog.stencil.so:443 x1, denied coding-intl.dashscope.aliyuncs.com x1, denied coding-intl.dashscope.aliyuncs.com:443 x1, denied hyper.charm.land x1, denied hyper.charm.land:443 x1, denied zenmux.ai x1, denied zenmux.ai:443 x1
+effective policy matches the rendering (strict: Status Effective, Source sandbox, no extra rules)
+omp session 01a1455f-08ad-76bf-88c8-8d18d410d7d8 (requested None); events <scratch>/openshell-state/a1b-ao-1-r1/session.jsonl; diagnostics <scratch>/openshell-state/a1b-ao-1-r1/pi-diagnostics.json
+result 75eae56885a7 on ao/AO-1 (bundle 486 bytes)

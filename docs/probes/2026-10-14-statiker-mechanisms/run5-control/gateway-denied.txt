@@ -1,0 +1,20 @@
+# control: gateway log lines with DENIED, grouped (sandbox id removed, 198.18.0.x placeholders folded)
+# total DENIED lines: 52; full log lines: 815
+   9  NET:REFUSE [MED] DENIED sdmntprsouthcentralus.oaiusercontent.com [reason:policy_dns_ineligible]
+   9  NET:OPEN [MED] DENIED /usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex(0) -> sdmntprsouthcentralus.oaiusercontent.com:443 [reason:transparent_tcp_policy_denied]
+   6  NET:OPEN [MED] DENIED /usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex(0) -> 198.18.0.x:443 [reason:transparent_tcp_mapping_denied]
+   4  NET:REFUSE [MED] DENIED example.com [reason:policy_dns_ineligible]
+   4  NET:OPEN [MED] DENIED /usr/bin/curl(0) -> example.com:443 [reason:transparent_tcp_policy_denied]
+   3  NET:REFUSE [MED] DENIED sdmntpreastus2.oaiusercontent.com [reason:policy_dns_ineligible]
+   3  NET:OPEN [MED] DENIED /usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex(0) -> sdmntpreastus2.oaiusercontent.com:443 [reason:transparent_tcp_policy_denied]
+   3  NET:REFUSE [MED] DENIED sdmntprcentralindia.oaiusercontent.com [reason:policy_dns_ineligible]
+   3  NET:OPEN [MED] DENIED /usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex(0) -> sdmntprcentralindia.oaiusercontent.com:443 [reason:transparent_tcp_policy_denied]
+   3  NET:REFUSE [MED] DENIED sdmntprcentralus.oaiusercontent.com [reason:policy_dns_ineligible]
+   3  NET:OPEN [MED] DENIED /usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex(0) -> sdmntprcentralus.oaiusercontent.com:443 [reason:transparent_tcp_policy_denied]
+   1  NET:OPEN [MED] DENIED /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe(0) -> 198.18.0.x:443 [reason:transparent_tcp_mapping_denied]
+   1  NET:REFUSE [MED] DENIED 63306d67e3e2 [reason:policy_dns_ineligible]
+
+# NET:OPEN / HTTP ALLOWED destinations, counted
+  58  chatgpt.com:443
+   4  api.anthropic.com:443
+   4  ab.chatgpt.com:443

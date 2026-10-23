@@ -1,0 +1,368 @@
+== install ==
+/tmp/pi-agent:
+total 16
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:16 .
+drwxrwxrwt 1 root    root    4096 Oct 14 22:16 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:16 agents
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:16 skills
+
+/tmp/pi-agent/agents:
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:16 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:16 ..
+-rw-r--r-- 1 sandbox sandbox  440 Oct 14 22:16 probe-agent.md
+
+/tmp/pi-agent/skills:
+total 12
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:16 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:16 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:16 probe-skill
+
+/tmp/pi-agent/skills/probe-skill:
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:16 .
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:16 ..
+-rw-r--r-- 1 sandbox sandbox  413 Oct 14 22:16 SKILL.md
+
+/tmp/pi-home:
+total 12
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:16 .
+drwxrwxrwt 1 root    root    4096 Oct 14 22:16 ..
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:16 .omp
+
+/tmp/pi-home/.omp:
+total 12
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:16 .
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:16 ..
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:16 agent
+
+/tmp/pi-home/.omp/agent:
+total 16
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:16 .
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:16 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:16 agents
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:16 skills
+
+/tmp/pi-home/.omp/agent/agents:
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:16 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:16 ..
+-rw-r--r-- 1 sandbox sandbox  441 Oct 14 22:16 probe-agent-home.md
+
+/tmp/pi-home/.omp/agent/skills:
+total 12
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:16 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:16 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:16 probe-skill-home
+
+/tmp/pi-home/.omp/agent/skills/probe-skill-home:
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:16 .
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:16 ..
+
+== pre-env ==
+uid=1000 HOME=/sandbox PI_CODING_AGENT_DIR=unset
+exec env CLAUDE_CODE_OAUTH_TOKEN entries: 0
+== pre-version ==
+omp/18.8.3
+== pre-help-flags ==
+      --config=<value>                  Load an extra config.yml-style overlay for this run (repeatable)
+      --hook=<value>                    Load a hook/extension file (can be used multiple times)
+  -e, --extension=<value>               Load an extension file (can be used multiple times)
+      --no-extensions                   Disable extension discovery (explicit -e paths still work)
+      --no-skills                       Disable skills discovery and loading
+      --skills=<value>                  Comma-separated glob patterns to filter skills (e.g., git-*,docker)
+== pre-fixtures ==
+/sandbox/plugins:
+total 20
+drwxr-xr-x 5 sandbox sandbox 4096 Oct 14 22:16 .
+drwx------ 1 sandbox sandbox 4096 Oct 14 22:16 ..
+drwxr-xr-x 4 sandbox sandbox 4096 Sep 15 14:51 pi-dispatch-guards
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 pi-probe
+drwxr-xr-x 9 sandbox sandbox 4096 Oct 13 15:29 statiker
+
+/sandbox/plugins/pi-dispatch-guards:
+total 36
+drwxr-xr-x 4 sandbox sandbox 4096 Sep 15 14:51 .
+drwxr-xr-x 5 sandbox sandbox 4096 Oct 14 22:16 ..
+-rw-r--r-- 1 sandbox sandbox   14 Sep 15 14:50 .gitignore
+-rw-r--r-- 1 sandbox sandbox 2734 Sep 15 14:51 README.md
+-rw-r--r-- 1 sandbox sandbox 6753 Sep 15 14:49 index.ts
+-rw-r--r-- 1 sandbox sandbox  404 Sep 15 14:50 package.json
+drwxr-xr-x 2 sandbox sandbox 4096 Sep 15 14:49 src
+drwxr-xr-x 2 sandbox sandbox 4096 Sep 15 14:51 test
+
+/sandbox/plugins/pi-dispatch-guards/src:
+total 20
+drwxr-xr-x 2 sandbox sandbox  4096 Sep 15 14:49 .
+drwxr-xr-x 4 sandbox sandbox  4096 Sep 15 14:51 ..
+-rw-r--r-- 1 sandbox sandbox 11405 Sep 15 14:49 guards.ts
+
+/sandbox/plugins/pi-dispatch-guards/test:
+total 24
+drwxr-xr-x 2 sandbox sandbox 4096 Sep 15 14:51 .
+drwxr-xr-x 4 sandbox sandbox 4096 Sep 15 14:51 ..
+-rw-r--r-- 1 sandbox sandbox 5283 Sep 15 14:51 e2e.ts
+-rw-r--r-- 1 sandbox sandbox 4790 Sep 15 14:50 guards.test.ts
+
+/sandbox/plugins/pi-probe:
+total 32
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 .
+drwxr-xr-x 5 sandbox sandbox 4096 Oct 14 22:16 ..
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 agents
+-rw-r--r-- 1 sandbox sandbox   72 Oct 14 22:08 dispatch-guards.json
+-rw-r--r-- 1 sandbox sandbox 5196 Oct 14 22:08 index.ts
+-rw-r--r-- 1 sandbox sandbox   37 Oct 14 22:08 overlay-isolation.yml
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 skills
+
+/sandbox/plugins/pi-probe/agents:
+total 16
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:08 omp
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:08 pi
+
+/sandbox/plugins/pi-probe/agents/omp:
+total 16
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:08 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 ..
+-rw-r--r-- 1 sandbox sandbox  441 Oct 14 22:08 probe-agent-home.md
+-rw-r--r-- 1 sandbox sandbox  440 Oct 14 22:08 probe-agent.md
+
+/sandbox/plugins/pi-probe/agents/pi:
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:08 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 ..
+-rw-r--r-- 1 sandbox sandbox  497 Oct 14 22:08 probe-agent.md
+
+/sandbox/plugins/pi-probe/skills:
+total 16
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:08 probe-skill
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:08 probe-skill-home
+
+/sandbox/plugins/pi-probe/skills/probe-skill:
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:08 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 ..
+-rw-r--r-- 1 sandbox sandbox  413 Oct 14 22:08 SKILL.md
+
+/sandbox/plugins/pi-probe/skills/probe-skill-home:
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:08 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:08 ..
+-rw-r--r-- 1 sandbox sandbox  395 Oct 14 22:08 SKILL.md
+== pre-auth ==
+stat: cannot statx '/tmp/pi-agent/auth.json': No such file or directory
+600 sandbox /tmp/pi-agent/agent.db
+
+== early-repo ==
+dot-git is a directory (full clone)
+b85f2343ba81a4fb8ca369ba0b4c70b26992b559
+b85f234 probe: pi fixtures (repository skill)
+b75f6a6 README: aos run under AOS has no --dry-run on the OpenShell route
+1447ca5 OpenShell: v2 policy, sandbox-safe Chromium flags, runner-provided database and evidence contract
+.agents/skills/repo-skill/SKILL.md
+ls: cannot access '.git/worktrees': No such file or directory
+== early-procs ==
+pid 57: bash -lc set -u
+mkdir -p /tmp/claude-home /tmp/pi-agent /tmp/pi-home /sandbox/codex-home /sandbox/incoming /sandbox/pi-sessions
+export CLAUDE_CONFIG_DIR=/tmp/claude-home PI_CODING_AGENT_DIR=/tmp/pi-agent CODEX_HOME=/sandbox/codex-home
+aos_deadline=$(( $(date +%s) + 4200 ))
+while [ ! -f /sandbox/job.tgz ]; do [ "$(date +%s)" -lt "$aos_deadline" ] || exit 1; sleep 1; done
+if [ -f /sandbox/services.env ]; then . /sandbox/services.env; fi
+mkdir -p /sandbox/repo && tar xzf /sandbox/job.tgz -C /sandbox/repo
+cd /sandbox/repo
+aos_harness() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --kill-after=30 2700 bash -c 'PI_CODING_AGENT_DIR=/tmp/pi-agent HOME=/tmp/pi-home omp --print --mode json --model openai-codex/gpt-6-luna --session-
+  fi
+  bash -c 'PI_CODING_AGENT_DIR=/tmp/pi-agent HOME=/tmp/pi-home omp --print --mode json --model openai-codex/gpt-6-luna --session-dir /sandbox/pi-sessions --no-e
+  ( sleep 2700; kill -TERM "$aos_hp" 2>/dev/null; sleep 30; kill -KILL "$aos_hp" 2>/dev/null ) </dev/null >/dev/null 2>&1 & aos_wp=$!
+  wait "$aos_hp"; aos_rc=$?; kill "$aos_wp" 2>/dev/null; return $aos_rc
+}
+date +%s%N > /sandbox/harness.started
+aos_harness </sandbox/prompt.txt >/sandbox/harness.out 2>/sandbox/harness.err
+rc=$?; for p in $(pgrep -u "$(id -u)"); do case "$p" in 1|$$|$PPID) ;; *) kill "$p" 2>/dev/null || true;; esac; done; sleep 1; for p in $(pgrep -u "$(id -u)"); 
+sleep 4200
+
+== subagent-files ==
+-- /sandbox/sub-probe.txt
+cat: /sandbox/sub-probe.txt: No such file or directory
+-- /sandbox/sub-probe-curl.txt
+cat: /sandbox/sub-probe-curl.txt: No such file or directory
+-- /sandbox/sub-probe-env.txt
+cat: /sandbox/sub-probe-env.txt: No such file or directory
+-- /sandbox/sub-probe-cwd.txt
+cat: /sandbox/sub-probe-cwd.txt: No such file or directory
+-- /sandbox/sub-second.txt
+openai-codex/gpt-5.6-terra
+-- /sandbox/sub-second-curl.txt
+7
+curl: (7) Failed to connect to example.com port 443 after 4 ms: Couldn't connect to server
+-- /sandbox/sub-second-env.txt
+0
+-- /sandbox/sub-second-cwd.txt
+/sandbox/repo
+== firelog ==
+-- /sandbox/.local/share/pi-probe/fires.jsonl absent
+-- /tmp/pi-home/.local/share/pi-probe/fires.jsonl lines=42
+{"t":1792016178.329,"event":"session_start","boundary":{"home":"/tmp/pi-home","cwd":"/sandbox/repo","pid":166,"argv0":"bun","token_entries":0,"env_keys_of_interest":["CLAUDE_CONFIG_DIR","CODEX_HOME","HOME","PI_CODING_AGENT_DIR","PI_NO_TITLE"],"fetch":"error TypeError ConnectionRefused Unable to connect. Is the computer able to access the url?","usr_write":"EACCES errno -13","state_write":"ok /tmp/pi-home/.local/state/pi-probe"}}
+{"t":1792016185.551,"event":"tool_call","tool":"todo","input_head":"{\"op\":\"init\",\"list\":[{\"phase\":\"probe\",\"items\":[\"Check P1 tool and append result\",\"Read available skills and append P2 phrases\",\"Run P3 hook commands in order an"}
+{"t":1792016188.625,"event":"tool_call","tool":"read","input_head":"{\"path\":\"xd://probe_echo\"}"}
+{"t":1792016189.846,"event":"tool_call","tool":"write","input_head":"{\"path\":\"xd://probe_echo\",\"content\":\"{\\\"text\\\":\\\"hello-from-the-desk\\\"}\"}"}
+{"t":1792016189.848,"event":"tool_call","tool":"probe_echo","input_head":"{\"text\":\"hello-from-the-desk\"}"}
+{"t":1792016189.849,"event":"probe_echo","text":"hello-from-the-desk"}
+{"t":1792016194.272,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"cat >> /sandbox/repo/probe-report.md <<'EOF'\\n## P1\\nPROBE-ECHO-OK hello-from-the-desk\\nEOF\",\"cwd\":\"/sandbox/repo\",\"pty\":false,\"async\":false}"}
+{"t":1792016197.194,"event":"tool_call","tool":"read","input_head":"{\"path\":\"skill://probe-skill/SKILL.md\"}"}
+{"t":1792016198.394,"event":"tool_call","tool":"read","input_head":"{\"path\":\"skill://repo-skill/SKILL.md\"}"}
+{"t":1792016201.974,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"cat >> /sandbox/repo/probe-report.md <<'EOF'\\n## P2\\nprobe-skill: Code phrase: PHRASE-PROBE-d0d3d5\\nprobe-skill path: /tmp/pi-agent/skills/probe-ski"}
+{"t":1792016204.654,"event":"tool_call","tool":"todo","input_head":"{\"op\":\"done\",\"task\":\"Check P1 tool and append result\",\"phase\":\"probe\"}"}
+{"t":1792016207.196,"event":"tool_call","tool":"todo","input_head":"{\"op\":\"done\",\"task\":\"Read available skills and append P2 phrases\",\"phase\":\"probe\"}"}
+{"t":1792016209.011,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"cd /sandbox/repo && { echo '## P3a'; echo '@@ allowed'; echo EXT-ALLOWED-OK; } 2>&1 | tee -a probe-report.md\",\"cwd\":\"/sandbox/repo\",\"pty\":false,\"asy"}
+{"t":1792016211.424,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"cd /sandbox/repo && { echo '## P3b'; echo '@@ deny'; echo EXT-DENY-ME; } 2>&1 | tee -a probe-report.md\",\"cwd\":\"/sandbox/repo\",\"pty\":false,\"async\":fa"}
+{"t":1792016211.424,"event":"tool_call","tool":"bash","decision":"block"}
+{"t":1792016214.504,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"cat >> /sandbox/repo/probe-report.md <<'EOF'\\n## P3b\\n[pi-probe] denied by the probe extension (EXT-DENY-ME)\\nEOF\",\"cwd\":\"/sandbox/repo\",\"pty\":false"}
+{"t":1792016214.504,"event":"tool_call","tool":"bash","decision":"block"}
+{"t":1792016215.946,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"cd /sandbox/repo && { echo '## P3c'; echo '@@ note'; echo EXT-NOTE-ME; } 2>&1 | tee -a probe-report.md\",\"cwd\":\"/sandbox/repo\",\"pty\":false,\"async\":fa"}
+{"t":1792016215.955,"event":"tool_result","tool":"bash","decision":"note"}
+{"t":1792016219.213,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"cat >> /sandbox/repo/probe-report.md <<'EOF'\\n[pi-probe] note appended by the probe extension\\nEOF\",\"cwd\":\"/sandbox/repo\",\"pty\":false,\"async\":false}"}
+{"t":1792016222.065,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"cd /sandbox/repo && { echo '## P3d'; echo '@@ firelog'; for f in \\\"$HOME/.local/share/pi-probe/fires.jsonl\\\" /tmp/pi-home/.local/share/pi-probe/fire"}
+{"t":1792016230.021,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"cd /sandbox/repo && H=$(git rev-parse HEAD) && { echo '## P4'; echo '@@ worktrees-before'; ls -la .git/worktrees 2>&1; echo '@@ wt-add-tmp'; git wor"}
+{"t":1792016236.921,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"cat >> /sandbox/repo/probe-report.md <<'EOF'\\n## P5\\nagents: probe-agent-home, scout, reviewer, security-reviewer, task, sonic\\nEOF\",\"cwd\":\"/sandbox"}
+{"t":1792016242.096,"event":"tool_call","tool":"task","input_head":"{\"context\":\"Run a mechanism probe. Do only the supplied numbered steps, with <m> replaced by probe. Use only bash. Do not access the dispatcher code word; if yo"}
+{"t":1792016248.789,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"cat >> /sandbox/repo/probe-report.md <<'EOF'\\n## P5 (i)\\nTask ProbeFirst failed preflight: Unknown agent \\\"probe-agent\\\". Available: probe-agent-hom"}
+{"t":1792016256.239,"event":"tool_call","tool":"task","input_head":"{\"context\":\"Mechanism probe. Use only bash. Do these steps in order and nothing else:\\n1. Write the exact model id you are running as (one line, for example gpt"}
+{"t":1792016256.266,"event":"before_subagent_spawn","agent":"probe-agent-home","model":null,"head":"{\"type\":\"before_subagent_spawn\",\"agent\":\"probe-agent-home\",\"invocationKind\":\"task\",\"patterns\":[\"openai-codex/gpt-5.6-terra\"],\"spawnKey\":\"ProbeSecond\"}"}
+{"t":1792016256.372,"event":"session_start","boundary":{"home":"/tmp/pi-home","cwd":"/sandbox/repo","pid":166,"argv0":"bun","token_entries":0,"env_keys_of_interest":["CLAUDE_CONFIG_DIR","CODEX_HOME","HOME","PI_CODING_AGENT_DIR","PI_NO_TITLE"],"fetch":"error TypeError ConnectionRefused Unable to connect. Is the computer able to access the url?","usr_write":"EACCES errno -13","state_write":"ok /tmp/pi-home/.local/state/pi-probe"}}
+{"t":1792016259.268,"event":"tool_call","tool":"wait","input_head":"{}"}
+{"t":1792016260.157,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"printf '%s\\\\n' 'openai-codex/gpt-5.6-terra' > /sandbox/sub-second.txt\",\"timeout\":10,\"cwd\":\"/sandbox/repo\",\"pty\":false,\"async\":false}"}
+{"t":1792016265.759,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"output=$(curl -sS --max-time 10 https://example.com 2>&1); status=$?; first=$(printf '%s\\\\n' \\\"$output\\\" | sed -n '1p'); printf '%s\\\\n%s\\\\n' \\\"$stat"}
+{"t":1792016268.244,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"env | grep -c CLAUDE_CODE_OAUTH_TOKEN > /sandbox/sub-second-env.txt\",\"timeout\":10,\"cwd\":\"/sandbox/repo\",\"pty\":false,\"async\":false}"}
+{"t":1792016271.249,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"pwd > /sandbox/sub-second-cwd.txt\",\"timeout\":10,\"cwd\":\"/sandbox/repo\",\"pty\":false,\"async\":false}"}
+{"t":1792016274.884,"event":"tool_call","tool":"yield","input_head":"{\"data\":{\"code_word\":\"NO-CODEWORD\",\"model_id\":\"openai-codex/gpt-5.6-terra\"}}"}
+{"t":1792016279.849,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"cat >> /sandbox/repo/probe-report.md <<'EOF'\\n## P5 (ii)\\n{\\n  \\\"code_word\\\": \\\"NO-CODEWORD\\\",\\n  \\\"model_id\\\": \\\"openai-codex/gpt-5.6-terra\\\"\\n}\\nc"}
+{"t":1792016282.725,"event":"tool_call","tool":"todo","input_head":"{\"op\":\"done\",\"task\":\"Run P3 hook commands in order and record outputs\",\"phase\":\"probe\"}"}
+{"t":1792016285.629,"event":"tool_call","tool":"todo","input_head":"{\"op\":\"done\",\"task\":\"Run P4 worktree probe and record output\",\"phase\":\"probe\"}"}
+{"t":1792016287.363,"event":"tool_call","tool":"todo","input_head":"{\"op\":\"done\",\"task\":\"Run P5 agent probes and record outputs\",\"phase\":\"probe\"}"}
+{"t":1792016290.18,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"cd /sandbox/repo && { echo '## P6'; echo '@@ env-count'; env | grep -c CLAUDE_CODE_OAUTH_TOKEN; echo '@@ printenv-prefix'; printenv CLAUDE_CODE_OAUT"}
+{"t":1792016296.022,"event":"tool_call","tool":"todo","input_head":"{\"op\":\"done\",\"task\":\"Run P6 boundary probe and record output\",\"phase\":\"probe\"}"}
+{"t":1792016297.412,"event":"tool_call","tool":"bash","input_head":"{\"command\":\"cd /sandbox/repo && git add probe-report.md && git -c user.name=pi-probe -c user.email=probe@sandbox.invalid commit -q -m \\\"probe: pi mechanism repo"}
+{"t":1792016300.649,"event":"tool_call","tool":"todo","input_head":"{\"op\":\"done\",\"task\":\"Commit probe report and report codeword\",\"phase\":\"probe\"}"}
+-- /sandbox/.local/share/pi/dispatch-guards-fires.jsonl absent
+-- /tmp/pi-home/.local/share/pi/dispatch-guards-fires.jsonl absent
+== state ==
+-- /sandbox/.local/state
+ls: cannot access '/sandbox/.local/state': No such file or directory
+-- /tmp/pi-home/.local/state
+/tmp/pi-home/.local/state:
+total 12
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:16 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 22:16 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:18 pi-probe
+
+/tmp/pi-home/.local/state/pi-probe:
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:18 .
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 14 22:16 ..
+-rw-r--r-- 1 sandbox sandbox    3 Oct 14 22:17 mark
+-rw-r--r-- 1 sandbox sandbox    0 Oct 14 22:18 mark-shell
+== worktrees ==
+total 8
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:17 .
+drwxr-xr-x 8 sandbox sandbox 4096 Oct 14 22:18 ..
+/sandbox/repo  b35529e [main]
+== usr-paths ==
+ls: cannot access '/usr/local/pi-wt': No such file or directory
+ls: cannot access '/usr/pi-mark': No such file or directory
+ls: cannot access '/usr/pi-probe-mark': No such file or directory
+== agent-dir ==
+/tmp/pi-agent
+/tmp/pi-agent/agent.db
+/tmp/pi-agent/agent.db-shm
+/tmp/pi-agent/agent.db-wal
+/tmp/pi-agent/agents
+/tmp/pi-agent/agents/probe-agent.md
+/tmp/pi-agent/custom-session-files
+/tmp/pi-agent/custom-session-files/8dc5a8d
+/tmp/pi-agent/models.db
+/tmp/pi-agent/models.db-shm
+/tmp/pi-agent/models.db-wal
+/tmp/pi-agent/skill-descriptions.db
+/tmp/pi-agent/skills
+/tmp/pi-agent/skills/probe-skill
+/tmp/pi-agent/skills/probe-skill/SKILL.md
+stat: cannot statx '/tmp/pi-agent/auth.json': No such file or directory
+600 /tmp/pi-agent/agent.db
+== pi-home ==
+/tmp/pi-home
+/tmp/pi-home/.bun
+/tmp/pi-home/.bun/install
+/tmp/pi-home/.bun/install/cache
+/tmp/pi-home/.bun/install/cache/@t@
+/tmp/pi-home/.local
+/tmp/pi-home/.local/share
+/tmp/pi-home/.local/share/pi-probe
+/tmp/pi-home/.local/share/pi-probe/fires.jsonl
+/tmp/pi-home/.local/state
+/tmp/pi-home/.local/state/pi-probe
+/tmp/pi-home/.local/state/pi-probe/mark
+/tmp/pi-home/.local/state/pi-probe/mark-shell
+/tmp/pi-home/.omp
+/tmp/pi-home/.omp/agent
+/tmp/pi-home/.omp/agent/agents
+/tmp/pi-home/.omp/agent/agents/probe-agent-home.md
+/tmp/pi-home/.omp/agent/skills
+/tmp/pi-home/.omp/agent/skills/probe-skill-home
+/tmp/pi-home/.omp/cache
+/tmp/pi-home/.omp/cache/legacy-pi-extension-cache.db
+/tmp/pi-home/.omp/cache/legacy-pi-extension-cache.db-shm
+/tmp/pi-home/.omp/cache/legacy-pi-extension-cache.db-wal
+/tmp/pi-home/.omp/install-id
+/tmp/pi-home/.omp/logs
+/tmp/pi-home/.omp/logs/omp.2026-10-14.166.log
+/tmp/pi-home/.omp/natives
+/tmp/pi-home/.omp/natives/18.8.3
+/tmp/pi-home/.omp/natives/18.8.3/pi_natives.linux-arm64.node
+/tmp/pi-home/.omp/run
+/tmp/pi-home/.omp/run/daemons
+/tmp/pi-home/.omp/run/daemons/2d54c54e044cd0ac
+== sessions-dir ==
+/sandbox/pi-sessions
+/sandbox/pi-sessions/2026-10-14T22-16-17-173Z_01a13c7c-d815-737d-849b-1c1b07c67af8
+/sandbox/pi-sessions/2026-10-14T22-16-17-173Z_01a13c7c-d815-737d-849b-1c1b07c67af8.jsonl
+/sandbox/pi-sessions/2026-10-14T22-16-17-173Z_01a13c7c-d815-737d-849b-1c1b07c67af8/ProbeSecond.jsonl
+/sandbox/pi-sessions/2026-10-14T22-16-17-173Z_01a13c7c-d815-737d-849b-1c1b07c67af8/ProbeSecond.md
+== auth-sha ==
+6599cc99e865f4740b7b188fc97a4696f058debf430472c2e03fd199e1bcf472 /tmp/pi-agent/agent.db
+== repo-after ==
+b35529e probe: pi mechanism report
+b85f234 probe: pi fixtures (repository skill)
+b75f6a6 README: aos run under AOS has no --dry-run on the OpenShell route
+1447ca5 OpenShell: v2 policy, sandbox-safe Chromium flags, runner-provided database and evidence contract
+f61e398 pyproject: declare the Apache-2.0 license and LICENSE file (as agent-os)
+== tmp ==
+total 24
+drwxrwxrwt 1 root    root    4096 Oct 14 22:17 .
+drwxr-xr-x 1 root    root    4096 Oct 14 22:16 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 22:16 claude-home
+drwx------ 2 sandbox sandbox 4096 Oct 14 22:18 omp-shell-snapshots-1000
+drwx------ 5 sandbox sandbox 4096 Oct 14 22:18 pi-agent
+drwxr-xr-x 5 sandbox sandbox 4096 Oct 14 22:16 pi-home
+
+== sessions ==
+jsonl files under ['/sandbox/pi-sessions', '/tmp/pi-agent', '/tmp/pi-home', '/sandbox/.pi', '/sandbox/.omp', '/sandbox/.local']: 2
+-- /sandbox/pi-sessions/2026-10-14T22-16-17-173Z_01a13c7c-d815-737d-849b-1c1b07c67af8.jsonl size=213031
+   first={"type": "title"} cwd=/sandbox/repo
+   assistant models=['openai-codex/gpt-6-luna'] kinds={"credential_pin": 1, "custom": 30, "message": 60, "model_change": 1, "session": 1, "thinking_level_change": 1, "title": 1}
+-- /sandbox/pi-sessions/2026-10-14T22-16-17-173Z_01a13c7c-d815-737d-849b-1c1b07c67af8/ProbeSecond.jsonl size=39580
+   first={"type": "title"} cwd=/sandbox/repo
+   assistant models=['openai-codex/gpt-5.6-terra'] kinds={"credential_pin": 1, "custom": 6, "message": 11, "model_change": 1, "session": 1, "session_init": 1, "thinking_level_change": 1, "title": 1}
+
+== in-sandbox-scan ==
+secret labels read inside the sandbox: ['access', 'accountId']
+files under /sandbox holding a pi secret: {'access': 0, 'accountId': 0}; control 'aos-policy': 2
+files under /tmp holding a pi secret: {'access': 0, 'accountId': 1}; control 'pi-agent': 1
+files under /home/sandbox holding a pi secret: {'access': 0, 'accountId': 0}; control 'PS1': 1
+pi secrets in the decompressed git objects: {k: objs.count(v) for k, v in values.items()}; control 'pi fixtures': 2

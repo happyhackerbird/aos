@@ -1,0 +1,155 @@
+mode=plugin events=458 non-json-lines=0 harness.rc=0
+init model=claude-sonnet-5-5 permissionMode=dontAsk
+result subtype=success is_error=False num_turns=8 duration_ms=74561 cost_usd=0.776966775
+models by context: {"desk": ["claude-sonnet-5-5"], "dbr2vA": ["claude-opus-5-5"], "FNtGhp": ["claude-haiku-5-5"], "MpPrpr": ["claude-sonnet-5-5"], "hZe1u1": ["claude-sonnet-5-5"]}
+
+R1 Skill tool (statiker:statiker, dispatch-guards:dispatch, negative statiker:nope)
+  init skills=["deep-research", "statiker:statiker", "dispatch-guards:dispatch", "dispatch-guards:executor", "dispatch-guards:worktree", "dataviz", "update-config", "verify", "debug", "code-review", "simplify", "batch", "fewer-permission-prompts", "doctor", "loop", "schedule", "claude-api", "workflow-authoring", "run", "run-skill-generator", "plugin-authoring"]
+  init plugins=[{"name": "statiker", "path": "/sandbox/plugins/statiker", "source": "statiker@inline", "version": "0.2.104"}, {"name": "dispatch-guards", "path": "/sandbox/plugins/dispatch-guards", "source": "dispatch-guards@inline", "version": "0.11.28"}, {"name": "cc-plugin-agents-md", "path": "builtin", "source": "cc-plugin-agents-md@builtin"}, {"name": "cc-plugin-plugin-authoring", "path": "builtin", "source": "cc-plugin-plugin-authoring@builtin"}]
+  event 29: 'Base directory for this skill: /sandbox/plugins/statiker/skills/statiker'
+  event 35: 'Base directory for this skill: /sandbox/plugins/dispatch-guards/skills/dispatch'
+  '0.2.104' occurrences inside injected skill texts: 0
+  event 25: Skill statiker:statiker -> is_error=False Launching skill: statiker:statiker
+  event 33: Skill dispatch-guards:dispatch -> is_error=False Launching skill: dispatch-guards:dispatch
+  event 36: Skill statiker:nope -> is_error=True <tool_use_error>Unknown skill: statiker:nope</tool_use_error>
+  result.permission_denials naming Skill: 0
+  statiker loaded=True dispatch loaded=True nonexistent errored=True
+  => PASS
+
+R2 statiker record and git tools (lint, closure, filter, state-gate, preflight)
+  lint: rc=2 STATIKER-RECORD VERDICT: {"verdict": "LINT_VIOLATIONS", "route": "repair-from-verdict", "violations": [{"code": "corrects-nothing", "line": 122, "text": "F37: `corrects line 121` names line 121, which carries no violation to repair", "repair": "bookkeeping: a ... [707 chars]
+  closure: rc=0 STATIKER-RECORD VERDICT: {"verdict": "CLOSURE_LIVE", "route": "proceed", "closing": "A3 at line 138", "late_intent": [], "entries": 120, "head_boundary": 27, "r_lines": 12, "mode": null, "skill_versions": [{"line": 4, "version": "0.2.104"}], "irreversible_unit... [267 chars]
+  filter: rc=0 STATIKER-RECORD VERDICT: {"verdict": "ARTIFACT_WRITTEN", "route": "proceed", "sha": "f87d33fbc663ef64daa26ce574e3cb5609dafe05", "out": "/tmp/stk-filter.md", "source_tracker": ".clippy/runs/2026-10-05-repo-policy-step1d.md", "newest_commit": "f87d33fbc663ef64da... [599 chars]
+  state-gate: rc=0 STATIKER-GIT VERDICT: {"verdict": "STATE_CLEAN", "route": "proceed", "ops": []}
+  preflight: rc=0 STATIKER-GIT VERDICT: {"verdict": "PREFLIGHT_OK", "route": "proceed", "tracker": ".clippy/runs/2026-10-05-repo-policy-step1d.md", "ops": [], "branch": "main", "worktree": false, "hooks_path": {"path": "/sandbox/repo/.git/hooks/pre-commit", "inside": true}, "ou... [416 chars]
+  exec /tmp/stk-filter.md: exists 164825 bytes\n# Run: repo policy step 1d (agent_os/policy.py, runner integration, directive amendment) — successor of 2026-10-05-repo-policy-step1c\nStatus: COMPLETE\nPhase: verify\nSkill: stat... [226 chars]
+  exec ~/.local/state/statiker after the run: /home/sandbox/.local/state/statiker:\ntotal 8\ndrwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:10 .\ndrwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:10 ..\n-rw-r--r-- 1 sandbox sandbox    0 Oct 14 21:10 mark2
+  => PASS
+
+R3 worktrees via statiker_git.py (add/list/remove; inside-repo and /usr negatives)
+  wt-add-tmp: rc=0 STATIKER-GIT VERDICT: {"verdict": "WORKTREE_ADDED", "route": "proceed", "path": "/tmp/stk-wt-1", "sha": "f87d33fbc663ef64daa26ce574e3cb5609dafe05"}
+  wt-remove: rc=0 STATIKER-GIT VERDICT: {"verdict": "WORKTREE_REMOVED", "route": "proceed", "path": "/tmp/stk-wt-1"}
+  wt-add-inside: rc=2 STATIKER-GIT VERDICT: {"verdict": "PATH_INSIDE_REPO", "route": "halt", "path": "/sandbox/repo/inner", "repo": "/sandbox/repo"}
+  wt-add-usr: rc=2 STATIKER-GIT VERDICT: {"verdict": "GIT_ERROR", "route": "halt", "command": "git worktree add --detach /usr/local/stk-wt f87d33fbc663ef64daa26ce574e3cb5609dafe05", "returncode": 128, "stderr": "Preparing worktree (detached HEAD f87d33f)\nfatal: could not create leading directories of '/usr/local/stk-wt/.git': Permission denied"}
+  wt-list: /sandbox/repo  f87d33f [main]\n/tmp/stk-wt-1  f87d33f (detached HEAD)
+  in-run before: ls: cannot access '.git/worktrees': No such file or directory
+  in-run after: /sandbox/repo  f87d33f [main]\ntotal 8\ndrwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:08 .\ndrwxr-xr-x 8 sandbox sandbox 4096 Oct 14 21:08 ..
+  exec after the run: total 8\ndrwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:08 .\ndrwxr-xr-x 8 sandbox sandbox 4096 Oct 14 21:10 ..\n/sandbox/repo  e8b711c [main]
+  exec /usr paths: ls: cannot access '/usr/local/stk-wt': No such file or directory\nls: cannot access '/usr/stk-mark': No such file or directory
+  => PASS
+
+R4 subagents with an explicit model (opus, haiku, sonnet), the model gate, the push gate
+  R4(i) event 72: Agent {"subagent_type": "general-purpose", "model": null, "name": null, "description": "ungated probe"}
+  R4(i)   hook_response PreToolUse:Agent exit=0 outcome=success stdout={"systemMessage": "[dispatch-guards/brief-reminder] Blocked: dispatch brief without the \u00a72 tail block, and its body names no write-boundary or commit-plan marker \u2014 the one condition under which this lane auto-r... [1918 chars] stderr=
+  R4(i)   hook_response PreToolUse:Agent exit=0 outcome=success stdout= stderr=
+  R4(i)   hook_response PreToolUse:Agent exit=2 outcome=error stdout= stderr=Model gate: agent dispatch without an explicit `model` — the agent would silently inherit the session model. Choose deliberately per the model table (~/.claude/CLAUDE.md 'Model routing for dispatches') or project routing... [342 chars]
+  R4(i)   hook_started PreToolUse:Agent x3
+  R4(i)   subagent events=0 models=[]
+  R4(i)   tool_result is_error=True PreToolUse:Agent hook error: ["/sandbox/plugins/dispatch-guards"/hooks/agent-model-gate.py]: Model gate: agent dispatch without an explicit `model` — the agent would silently inherit the session model. Choose deliberately per the model table (~/.claude/CLAUDE.md 'Model routing for dispatches') or pr... [494 chars]
+  R4(ii) event 104: Agent {"subagent_type": "general-purpose", "model": "opus", "name": "opus-probe", "description": "opus: probe"}
+  R4(ii)   hook_response PreToolUse:Agent exit=0 outcome=success stdout={"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "Dispatch tier: small-write \u2014 brief form lanes skipped. You still verify the result before relying on it."}} stderr=
+  R4(ii)   hook_response PreToolUse:Agent exit=0 outcome=success stdout= stderr=
+  R4(ii)   hook_response PreToolUse:Agent exit=0 outcome=success stdout= stderr=
+  R4(ii)   hook_started PreToolUse:Agent x3
+  R4(ii)   subagent events=5 models=['claude-opus-5-5']
+  R4(ii)   tool_result is_error=False Async agent launched successfully. (This tool result is internal metadata — never quote or paste any part of it, including the agentId below, into a user-facing reply.)\nagentId: a716e10e9098b6d62 (internal ID - do not mention to user. Use SendMessage with to: 'a716e10e9098b6d62', summary: '<5-10 wo... [1044 chars]
+  R4(iii) event 169: Agent {"subagent_type": "general-purpose", "model": "haiku", "name": null, "description": "haiku: probe"}
+  R4(iii)   hook_response PreToolUse:Agent exit=0 outcome=success stdout={"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "Dispatch tier: small-write \u2014 brief form lanes skipped. You still verify the result before relying on it."}} stderr=
+  R4(iii)   hook_response PreToolUse:Agent exit=0 outcome=success stdout= stderr=
+  R4(iii)   hook_response PreToolUse:Agent exit=0 outcome=success stdout={"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": {"description": "haiku: probe", "prompt": "Mechanism probe. Use only the Bash tool. Do these steps in order and nothing else:\n1. Write the exact mod... [914 chars] stderr=
+  R4(iii)   hook_started PreToolUse:Agent x3
+  R4(iii)   subagent events=6 models=['claude-haiku-5-5']
+  R4(iii)   tool_result is_error=False Async agent launched successfully. (This tool result is internal metadata — never quote or paste any part of it, including the agentId below, into a user-facing reply.)\nagentId: aea8ce79b2cb07b95 (internal ID - do not mention to user. Use SendMessage with to: 'aea8ce79b2cb07b95', summary: '<5-10 wo... [1044 chars]
+  R4(iv) event 231: Agent {"subagent_type": "general-purpose", "model": "sonnet", "name": null, "description": "sonnet: probe"}
+  R4(iv)   hook_response PreToolUse:Agent exit=0 outcome=success stdout= stderr=
+  R4(iv)   hook_response PreToolUse:Agent exit=0 outcome=success stdout={"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": {"description": "sonnet: probe", "prompt": "Mechanism probe. Use only the Bash tool. Do these steps in order and nothing else:\n1. Write the exact mo... [922 chars] stderr=
+  R4(iv)   hook_response PreToolUse:Agent exit=0 outcome=success stdout={"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "Dispatch tier: small-write \u2014 brief form lanes skipped. You still verify the result before relying on it."}} stderr=
+  R4(iv)   hook_started PreToolUse:Agent x3
+  R4(iv)   subagent events=4 models=['claude-sonnet-5-5']
+  R4(iv)   tool_result is_error=False Async agent launched successfully. (This tool result is internal metadata — never quote or paste any part of it, including the agentId below, into a user-facing reply.)\nagentId: aa646ca123e186ba7 (internal ID - do not mention to user. Use SendMessage with to: 'aa646ca123e186ba7', summary: '<5-10 wo... [1044 chars]
+  R4(v) event 291: Agent {"subagent_type": "general-purpose", "model": "sonnet", "name": null, "description": "sonnet: push probe"}
+  R4(v)   hook_response PreToolUse:Agent exit=0 outcome=success stdout={"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "Dispatch starting \u2014 brief check: decision-complete (assignments made, files listed not paraphrased, grounding stated, write boundaries, ga... [526 chars] stderr=
+  R4(v)   hook_response PreToolUse:Agent exit=0 outcome=success stdout= stderr=
+  R4(v)   hook_response PreToolUse:Agent exit=0 outcome=success stdout={"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": {"description": "sonnet: push probe", "prompt": "Mechanism probe (push gate). Grounding: none needed, a single command. Write boundaries: no file wri... [716 chars] stderr=
+  R4(v)   hook_started PreToolUse:Agent x3
+  R4(v)   subagent events=4 models=['claude-sonnet-5-5']
+  R4(v)   tool_result is_error=False Async agent launched successfully. (This tool result is internal metadata — never quote or paste any part of it, including the agentId below, into a user-facing reply.)\nagentId: afcc0feb0a27fbbeb (internal ID - do not mention to user. Use SendMessage with to: 'afcc0feb0a27fbbeb', summary: '<5-10 wo... [1044 chars]
+  exec subagent files: -- /sandbox/sub-opus.txt\nclaude-opus-5-5\n-- /sandbox/sub-opus-curl.txt\nexit=7\ncurl: (7) Failed to connect to example.com port 443 after 2 ms: Couldn't connect to server\n-- /sandbox/sub-haiku.txt\nclaude-haiku-5-5\n-- /sandbox/sub-haiku-curl.txt\nexit=7 first=curl: (7) Failed to connect to example.com port 443 after 3 ms: Couldn't connect to server\n-- /sandbox/sub-sonnet.txt\nclaude-sonnet-5-5\n-- /sandbox/sub-sonnet-curl.txt\n7 curl: (7) Failed to connect to example.com port 443 after 1 ms: Couldn't connect to server
+  R4(ii): subagent models=[['claude-opus-5-5']] file=claude-opus-5-5 curl=exit=7\ncurl: (7) Failed to connect to example.com port 443 after 2 ms: Couldn't connect to server
+  R4(iii): subagent models=[['claude-haiku-5-5']] file=claude-haiku-5-5 curl=exit=7 first=curl: (7) Failed to connect to example.com port 443 after 3 ms: Couldn't connect to server
+  R4(iv): subagent models=[['claude-sonnet-5-5']] file=claude-sonnet-5-5 curl=7 curl: (7) Failed to connect to example.com port 443 after 1 ms: Couldn't connect to server
+  R4(v)   subagent push tool_result: PreToolUse:Bash hook error: [dispatch-guards/subagent-push-gate] Push gate: subagents commit UNPUSHED — pushing is the dispatcher's act after verification (dispatch skill §1). Commit your work and report the hash; the main agent pushes. Nothing in this command ran — including any earlier links that ... [373 chars]
+  R4(v)   hook_response PreToolUse:Bash event 318: {"systemMessage": "[dispatch-guards/subagent-push-gate] Push gate: subagents commit UNPUSHED \u2014 pushing is the dispatcher's act after verification (dispatch skill \u00a71). Commit your work and report the hash; the main agent pushes. Nothing in this comman... [858 chars]
+  code word: in Agent inputs=0, in subagent events=0, in subagent files=0; positive control, in the desk's final result=1
+  sub-verdicts: {'i': True, 'ii': True, 'iii': True, 'iv': True, 'v': True}; code word clean with control: True
+  => PASS
+
+R5 hooks: the hook_started set, the skill gate before the dispatch skill load, the fire log
+  hook_started counts: {'PostToolUse:Agent': 8, 'PostToolUse:Bash': 18, 'PreToolUse:Agent': 18, 'PreToolUse:Bash': 95, 'Stop': 5, 'SubagentStop': 16}
+  hook_response total=160 deny-or-exit-2=5
+  expected names present: {'PreToolUse:Agent': True, 'PreToolUse:Bash': True, 'PostToolUse:': True, 'SubagentStop': True, 'Stop': True}
+  R5a event 1: Agent {"subagent_type": "general-purpose", "model": "sonnet", "name": null, "description": "sonnet: preload probe"}
+  R5a   hook_response PreToolUse:Agent exit=0 outcome=success stdout={"systemMessage": "[dispatch-guards/brief-reminder] Blocked: dispatch brief without the \u00a72 tail block, and its body names no write-boundary or commit-plan marker \u2014 the one condition under which this lane auto-r... [1918 chars] stderr=
+  R5a   hook_response PreToolUse:Agent exit=0 outcome=success stdout={"systemMessage": "[dispatch-guards/dispatch-skill-gate] Blocked: dispatch without the dispatch skill loaded this session. Load it first \u2014 Skill tool: Skill(skill=\"dispatch-guards:dispatch\") (or Read /sandbox/plug... [1376 chars] stderr=
+  R5a   hook_response PreToolUse:Agent exit=0 outcome=success stdout={"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": {"description": "sonnet: preload probe", "prompt": "Reply with the single word PRELOAD-OK and nothing else.", "subagent_type": "general-purpose", "mo... [269 chars] stderr=
+  R5a   hook_started PreToolUse:Agent x3
+  R5a   subagent events=0 models=[]
+  R5a   tool_result is_error=True PreToolUse:Agent hook error: [dispatch-guards/dispatch-skill-gate] Blocked: dispatch without the dispatch skill loaded this session. Load it first — Skill tool: Skill(skill="dispatch-guards:dispatch") (or Read /sandbox/plugins/dispatch-guards/skills/dispatch/SKILL.md) — then retry the dispatch. The ... [626 chars]
+  exec ~/.local/share/claude: ls: cannot access '/home/sandbox/.local/share/claude': No such file or directory\nbash: line 4: /home/sandbox/.local/share/claude/*.jsonl: No such file or directory\n-- /home/sandbox/.local/share/claude/*.jsonl lines=\ntail: cannot open '/home/sandbox/.local/share/claude/*.jsonl' for reading: No such file or directory
+  fire-log files with line counts: []
+  => FAIL
+
+R6 Codex as implementer inside the sandbox (codex exec), with the network negative control
+  event 354: R6a model=gpt-5.6-terra sandbox=workspace-write timeout=600000 rc=0
+    output tail: seconds\nOutput:\nFailed to write file /sandbox/repo/codex-hello.txt\n\npatch: failed\n/sandbox/repo/codex-hello.txt\ncodex\nI couldn’t create the file: the workspace write operation is currently failing (`Failed to write file /sandbox/repo/codex-hello.txt`), and shell access is blocked by the environment’s sandbox setup.\ntokens used\n5,391\n@@ stdout\nI couldn’t create the file: the workspace write operation is currently failing (`Failed to write file /sandbox/repo/codex-hello.txt`), and shell access is blocked by the environment’s sandbox setup.\n@@ file\ncat: codex-hello.txt: No such file ... [612 chars]
+  event 371: R6b model=gpt-5.6-terra sandbox=workspace-write timeout=600000 rc=0
+    output tail: onnectivity check and return its first output line.\nexec\n/bin/bash -lc "curl -sS --max-time 10 https://example.com | sed -n '1p'" in /sandbox/repo\n exited 1 in 0ms:\nbwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. On e.g. debian this can be enabled with 'sysctl kernel.unprivileged_userns_clone=1'.\n\ncodex\nCouldn’t run it: this environment blocks the command sandbox from creating a required namespace.\ntokens used\n3,215\n@@ stdout\nCouldn’t run it: this environment blocks the command sandbox from creating a required... [611 chars]
+  event 389: R6c model=gpt-5.6-terra sandbox=danger-full-access timeout=600000 rc=0
+    output tail: 00644\nindex 0000000000000000000000000000000000000000..25682c262b98be07918f94bc7aade659356d5730\n--- /dev/null\n+++ b/codex-hello.txt\n@@ -0,0 +1 @@\n+terra-ok\n\ncodex\nCreated [codex-hello.txt](/sandbox/repo/codex-hello.txt) containing exactly `terra-ok`.\ndiff --git a/codex-hello.txt b/codex-hello.txt\nnew file mode 100644\nindex 0000000000000000000000000000000000000000..25682c262b98be07918f94bc7aade659356d5730\n--- /dev/null\n+++ b/codex-hello.txt\n@@ -0,0 +1 @@\n+terra-ok\n\ntokens used\n2,870\n@@ stdout\nCreated [codex-hello.txt](/sandbox/repo/codex-hello.txt) containing exactly `terra-o... [622 chars]
+  event 405: R6d model=gpt-5.6-terra sandbox=danger-full-access timeout=600000 rc=0
+    output tail: e\nreasoning summaries: none\nsession id: 01a13c40-2036-7db3-b3f2-974356f7743b\n--------\nuser\nRun: curl -sS --max-time 10 https://example.com and print the first line\ncodex\nI’ll run the requested network check and return its first output line.\nexec\n/bin/bash -lc "curl -sS --max-time 10 https://example.com | sed -n '1p'" in /sandbox/repo\n succeeded in 0ms:\ncurl: (7) Failed to connect to example.com port 443 after 3 ms: Couldn't connect to server\n\ncodex\n`curl` failed: couldn’t connect to example.com on port 443.\ntokens used\n2,863\n@@ stdout\n`curl` failed: couldn’t connect to exampl... [618 chars]
+  exec /sandbox/repo/codex-hello.txt: terra-ok
+  R6b stdout: Couldn’t run it: this environment blocks the command sandbox from creating a required namespace.
+  R6d stdout: `curl` failed: couldn’t connect to example.com on port 443.
+  file created: True; network denial seen in a negative control: True
+  => PASS
+
+R7 boundaries through the mechanisms: the token placeholder, a /usr write, the statiker state write
+  env | grep -c CLAUDE_CODE_OAUTH_TOKEN: 0
+  printenv ... | cut -c1-12: 
+  /usr/stk-mark: rc=1 Traceback (most recent call last):\n  File "<string>", line 1, in <module>\nPermissionError: [Errno 13] Permission denied: '/usr/stk-mark'\nrc=1
+  ~/.local/state/statiker/mark (literal): rc=1 Traceback (most recent call last):\n  File "<string>", line 1, in <module>\nFileNotFoundError: [Errno 2] No such file or directory: '/home/sandbox/.local/state/statiker/mark'\nrc=1
+  ~/.local/state/statiker/mark2 (makedirs first): rc=0 rc=0\ntotal 8\ndrwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:10 .\ndrwxr-xr-x 3 sandbox sandbox 4096 Oct 14 21:10 ..\n-rw-r--r-- 1 sandbox sandbox    0 Oct 14 21:10 mark2
+  => FAIL
+
+secret scan over 13 downloaded files, labels ['claude_oauth_token', 'codex_access_token', 'codex_id_token', 'codex_refresh_token'] (values never printed):
+  codex-r6a.err.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (1756 bytes)
+  codex-r6a.out.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (203 bytes)
+  codex-r6b.err.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (1166 bytes)
+  codex-r6b.out.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (99 bytes)
+  codex-r6c.err.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (1265 bytes)
+  codex-r6c.out.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (88 bytes)
+  codex-r6d.err.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (731 bytes)
+  codex-r6d.out.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (62 bytes)
+  exec-reads.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (9519 bytes)
+  harness.err: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (0 bytes)
+  harness.out: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (485573 bytes)
+  harness.rc: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (2 bytes)
+  probe-report.md: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (13329 bytes)
+  total hits: 0; positive control (planted string in a copy of the first file): 1
+
+secret scan over the 13 evidence files (values never printed):
+  checks.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  claude-settings.json: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  effective-policy.yaml: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  exec-reads.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  gateway-denied.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  gateway-status.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  main-script.sh: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  probe-report.md: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  prompt.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  run-summary.json: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  sandboxes-after.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  sandboxes-before.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  stream-events.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  total hits: 0; positive control: 1

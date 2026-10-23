@@ -1,0 +1,1 @@
+CODEX_HOME=/sandbox/codex-home codex exec --json --skip-git-repo-check --sandbox danger-full-access -c approval_policy="never" -c features.hooks=false -c features.multi_agent=false -c features.plugins=false -c features.apps=false "$(cat /sandbox/prompt.txt)"

@@ -1,0 +1,41 @@
+mode=notrust events=13 non-json-lines=0 harness.rc=0
+thread=01a13c74-4e3c-7281-8bc0-48b8f40eafa0 items={'agent_message': 2, 'command_execution': 4} usage={"input_tokens": 76510, "cached_input_tokens": 60544, "cache_write_input_tokens": 0, "output_tokens": 349, "reasoning_output_tokens": 0}
+
+K2 hooks: the fire log per event, the SessionStart boundary read, the PreToolUse deny, the Stop block
+  fire log lines=0 events={}
+  deny decisions=0 stop fires=0 stop decisions=[]
+  K2b item status=completed exit=0 out=## K2b\n@@ deny\nHOOK-DENY-ME\n
+  K2a ran=True; K2b command items=1 ran(output seen)=True; agent texts naming a denial/hook=0
+  final message carries STOP-HOOK-SEEN: False
+  K2c in-run cat of the fire log: cat: /sandbox/.local/share/codex-probe/fires.jsonl: No such file or directory\nrc=0
+  => PASS
+
+K7 the run itself: thread id, item counts, usage, errors, harness.rc, final message
+  thread=01a13c74-4e3c-7281-8bc0-48b8f40eafa0 events=13 non-json-lines=0 harness.rc=0
+  item types={'agent_message': 2, 'command_execution': 4} usage={"input_tokens": 76510, "cached_input_tokens": 60544, "cache_write_input_tokens": 0, "output_tokens": 349, "reasoning_output_tokens": 0}
+  final: Committed report as `0d9b69d`. K2b ran successfully; K2c recorded the missing-file error. Nothing pushed.\n\nFINAL: CODEWORD-175da0
+  => PASS
+
+secret scan over 5 downloaded files, labels ['claude_oauth_token', 'codex_access_token', 'codex_id_token', 'codex_refresh_token'] (values never printed):
+  exec-reads.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (9857 bytes)
+  harness.err: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (39 bytes)
+  harness.out: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (3360 bytes)
+  harness.rc: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (2 bytes)
+  probe-report.md: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0} (163 bytes)
+  total hits: 0; positive control (planted string in a copy of the first file): 1
+
+secret scan over the 13 evidence files (values never printed):
+  checks.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  codex-command.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  effective-policy.yaml: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  exec-reads.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  gateway-log.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  gateway-status.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  main-script.sh: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  probe-report.md: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  prompt.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  run-summary.json: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  sandboxes-after.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  sandboxes-before.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  stream-events.txt: {"claude_oauth_token": 0, "codex_refresh_token": 0, "codex_access_token": 0, "codex_id_token": 0}
+  total hits: 0; positive control: 1

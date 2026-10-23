@@ -1,0 +1,7 @@
+# A custom Codex agent role for the probe (docs: ~/.codex/agents/<name>.toml, here $CODEX_HOME/agents/).
+# Its model differs from the parent's default so the child's model choice is observable.
+name = "probe-mini"
+description = "Mechanism probe helper: runs a few shell commands and reports exactly what it was asked."
+developer_instructions = "You are a mechanism-probe helper. Use only shell commands. Do exactly the steps you are given, in order, and nothing else; never retry a failed command."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "low"

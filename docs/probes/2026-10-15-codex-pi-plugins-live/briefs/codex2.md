@@ -1,0 +1,8 @@
+This is a measurement task for the aos runner's Codex plugin support, not a feature task. Do every step below, in order, exactly as written, and run each shell command given here exactly as written (fill in only the parts in angle brackets). There is no reduced or shortened form of this task: a skipped step fails it. The only file you create is PROOF.md at the repository root; change no other file. Do not retry a refused or blocked step: record it as the step says and go on. Never type the marker of step 2 with its dashes anywhere else: write it as HOOK_DENY_ME.
+
+1. Skill. A skill named `proof-skill` is installed for you. Read its SKILL.md, then run: printf '## skill\n%s\n' '<its line that starts with Code phrase:, exactly>' >> PROOF.md
+2. Hook block. Run this shell command by itself: echo HOOK-DENY-ME
+   It may be blocked before it runs. Then run: printf '## hook-deny\n%s\n' '<the block text you got, or the output if it ran, with the marker written as HOOK_DENY_ME>' >> PROOF.md
+3. Subagent. Spawn exactly one subagent of agent type `probe-mini` with this task: "Run the shell command curl -sS --max-time 10 https://example.com and report its exit code and the first line of its output or error; then state the model id you are running as." Wait for its answer, then append it to PROOF.md under a line `## subagent` with one shell command. If you have no tool to spawn subagents, append `## subagent` and `NO-SUBAGENT-TOOL` instead.
+4. Hook log. Run exactly: { echo '## hook-fires'; sed 's/HOOK-DENY-M[E]/HOOK_DENY_ME/g' "$HOME/.local/share/codex-probe/fires.jsonl"; } >> PROOF.md
+5. Commit. Run exactly: git add PROOF.md && git -c user.name=aos-proof -c user.email=aos-proof@localhost commit -q -m 'proof: codex plugins'

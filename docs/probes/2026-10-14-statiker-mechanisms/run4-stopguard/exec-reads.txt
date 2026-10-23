@@ -1,0 +1,164 @@
+== pre-env ==
+uid=1000 HOME=/sandbox CODEX_HOME=unset CLAUDE_CONFIG_DIR=unset
+exec env CLAUDE_CODE_OAUTH_TOKEN entries: 1
+exec env placeholder prefix: openshell:re
+== pre-plugins ==
+/sandbox/plugins:
+total 16
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 21:18 .
+drwx------ 1 sandbox sandbox 4096 Oct 14 21:18 ..
+drwxr-xr-x 5 sandbox sandbox 4096 Sep 15 15:58 dispatch-guards
+drwxr-xr-x 6 sandbox sandbox 4096 Oct 13 16:06 statiker
+
+/sandbox/plugins/dispatch-guards:
+total 20
+drwxr-xr-x 5 sandbox sandbox 4096 Sep 15 15:58 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 21:18 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Sep 26 18:17 .claude-plugin
+drwxr-xr-x 2 sandbox sandbox 4096 Sep 26 18:17 hooks
+drwxr-xr-x 5 sandbox sandbox 4096 Sep 15 15:58 skills
+
+/sandbox/plugins/dispatch-guards/hooks:
+total 428
+drwxr-xr-x 2 sandbox sandbox   4096 Sep 26 18:17 .
+drwxr-xr-x 5 sandbox sandbox   4096 Sep 15 15:58 ..
+-rw-r--r-- 1 sandbox sandbox  48632 Sep 26 18:17 _dispatch_common.py
+-rwxr-xr-x 1 sandbox sandbox  43119 Sep 26 18:17 agent-model-gate.py
+-rwxr-xr-x 1 sandbox sandbox  11661 Sep 15 15:58 amend-gate.py
+-rwxr-xr-x 1 sandbox sandbox 124748 Sep 18 12:09 brief-reminder.py
+-rwxr-xr-x 1 sandbox sandbox   7037 Sep 15 15:58 discovery-volume-reminder.py
+-rwxr-xr-x 1 sandbox sandbox   8410 Sep 15 15:58 dispatch-log.py
+-rwxr-xr-x 1 sandbox sandbox  12212 Sep 18 12:09 dispatch-skill-gate.py
+-rw-r--r-- 1 sandbox sandbox   3335 Sep 15 15:58 hooks.json
+-rwxr-xr-x 1 sandbox sandbox   4693 Sep 15 15:58 message-payload-gate.py
+-rwxr-xr-x 1 sandbox sandbox  26539 Sep 15 15:58 push-claim-reminder.py
+-rwxr-xr-x 1 sandbox sandbox  10642 Sep 15 15:58 report-enforcer.py
+-rwxr-xr-x 1 sandbox sandbox   8700 Sep 15 15:58 report-form-gate.py
+-rwxr-xr-x 1 sandbox sandbox   2599 Sep 15 15:58 report-reminder.py
+-rwxr-xr-x 1 sandbox sandbox   4922 Sep 15 15:58 subagent-push-gate.py
+-rwxr-xr-x 1 sandbox sandbox  15334 Sep 15 15:58 worktree-config-gate.py
+-rwxr-xr-x 1 sandbox sandbox  20551 Sep 15 15:58 writer-claims-gate.py
+-rwxr-xr-x 1 sandbox sandbox  44984 Sep 15 15:58 writer-reservation-gate.py
+
+/sandbox/plugins/statiker:
+total 24
+drwxr-xr-x 6 sandbox sandbox 4096 Oct 13 16:06 .
+drwxr-xr-x 4 sandbox sandbox 4096 Oct 14 21:18 ..
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 13 16:06 .claude-plugin
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:01 .in_use
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 13 16:06 hooks
+drwxr-xr-x 3 sandbox sandbox 4096 Oct 13 16:06 skills
+== pre-codex-home ==
+755 sandbox /sandbox/codex-home
+600 sandbox /sandbox/codex-home/auth.json
+
+== early-repo ==
+dot-git is a directory (full clone)
+f87d33fbc663ef64daa26ce574e3cb5609dafe05
+f87d33f probe: statiker fixtures (step1d tracker copy, stop-guard tracker)
+b75f6a6 README: aos run under AOS has no --dry-run on the OpenShell route
+1447ca5 OpenShell: v2 policy, sandbox-safe Chromium flags, runner-provided database and evidence contract
+.clippy/runs/2026-10-05-repo-policy-step1d.md
+.clippy/runs/2026-10-14-probe-statiker.md
+ls: cannot access '.git/worktrees': No such file or directory
+== early-main-env ==
+pid 151: timeout --kill-after=30 2700 bash -c claude -p "$(cat /sandbox/prompt.
+bash: line 2: /proc/151/environ: Permission denied
+bash: line 2: /proc/151/environ: Permission denied
+  token entries: 0
+pid 152: claude -p This is a mechanism probe, not a feature task: write /sandbo
+
+Write it with one Bash call, exactly: printf 'stopguard-ran\n' > /sand
+
+Then end your turn with a one-line final message. If a hook blocks you
+file and do not start any other work: reply in one line that a stop ho
+first sentence of its reason, and end your turn again. --output-format
+bash: line 2: /proc/152/environ: Permission denied
+bash: line 2: /proc/152/environ: Permission denied
+  token entries: 0
+
+== subagent-files ==
+-- /sandbox/sub-opus.txt
+cat: /sandbox/sub-opus.txt: No such file or directory
+-- /sandbox/sub-opus-curl.txt
+cat: /sandbox/sub-opus-curl.txt: No such file or directory
+-- /sandbox/sub-haiku.txt
+cat: /sandbox/sub-haiku.txt: No such file or directory
+-- /sandbox/sub-haiku-curl.txt
+cat: /sandbox/sub-haiku-curl.txt: No such file or directory
+-- /sandbox/sub-sonnet.txt
+cat: /sandbox/sub-sonnet.txt: No such file or directory
+-- /sandbox/sub-sonnet-curl.txt
+cat: /sandbox/sub-sonnet-curl.txt: No such file or directory
+== filter-artifact ==
+absent
+== statiker-state ==
+HOME=/sandbox
+-- /sandbox/.local/state/statiker
+ls: cannot access '/sandbox/.local/state/statiker': No such file or directory
+-- /home/sandbox/.local/state/statiker
+ls: cannot access '/home/sandbox/.local/state/statiker': No such file or directory
+== firelog ==
+-- /sandbox/.local/share/claude
+ls: cannot access '/sandbox/.local/share/claude': No such file or directory
+-- /home/sandbox/.local/share/claude
+ls: cannot access '/home/sandbox/.local/share/claude': No such file or directory
+== worktrees ==
+ls: cannot access '.git/worktrees': No such file or directory
+/sandbox/repo  f87d33f [main]
+== usr-paths ==
+ls: cannot access '/usr/local/stk-wt': No such file or directory
+ls: cannot access '/usr/stk-mark': No such file or directory
+== codex-hello ==
+cat: /sandbox/repo/codex-hello.txt: No such file or directory
+== stopguard-file ==
+stopguard-ran
+== repo-after ==
+f87d33f probe: statiker fixtures (step1d tracker copy, stop-guard tracker)
+b75f6a6 README: aos run under AOS has no --dry-run on the OpenShell route
+1447ca5 OpenShell: v2 policy, sandbox-safe Chromium flags, runner-provided database and evidence contract
+f61e398 pyproject: declare the Apache-2.0 license and LICENSE file (as agent-os)
+c39dd2a License under Apache-2.0 (as agent-os); verify skill names the macOS-sandbox blocker
+?? stopguard-ran.txt
+== codex-auth ==
+0fd8cd9c897f8677af5cd58d99b7f6c7bb594a4bd8a173402d9ceb7b9b075872
+600
+total 12
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:18 .
+drwx------ 1 sandbox sandbox 4096 Oct 14 21:18 ..
+-rw------- 1 sandbox sandbox 3884 Oct 14 21:18 auth.json
+== claude-home ==
+/tmp/claude-home
+/tmp/claude-home/backups
+/tmp/claude-home/backups/.claude.json.backup.1792012707350
+/tmp/claude-home/sessions
+/tmp/claude-home/.last-cleanup
+/tmp/claude-home/policy-limits.json
+/tmp/claude-home/session-env
+/tmp/claude-home/session-env/ebf9ee76-912e-453d-934f-595130c90157
+/tmp/claude-home/.claude.json
+/tmp/claude-home/projects
+/tmp/claude-home/projects/-sandbox-repo
+/tmp/claude-home/projects/-sandbox-repo/ebf9ee76-912e-453d-934f-595130c90157.jsonl
+/tmp/claude-home/projects/-sandbox-repo/memory
+/tmp/claude-home/remote-settings.json
+/tmp/claude-home/policy-limits.json.stamp.json
+/tmp/claude-home/shell-snapshots
+/tmp/claude-home/plugins
+/tmp/claude-home/plugins/data
+/tmp/claude-home/plugins/data/dispatch-guards-inline
+== tmp ==
+total 28
+drwxrwxrwt 1 root    root    4096 Oct 14 21:18 .
+drwxr-xr-x 1 root    root    4096 Oct 14 21:18 ..
+drwx------ 2 sandbox sandbox 4096 Oct 14 21:18 cc-socks
+drwx------ 3 sandbox sandbox 4096 Oct 14 21:18 claude-1000
+drwxr-xr-x 8 sandbox sandbox 4096 Oct 14 21:18 claude-home
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:18 pi-agent
+drwxr-xr-x 2 sandbox sandbox 4096 Oct 14 21:18 pi-home
+
+== in-sandbox-scan ==
+files under /sandbox holding a codex token: {'id_token': 0, 'access_token': 0, 'refresh_token': 0}; control 'aos-policy': 3
+files under /tmp holding a codex token: {'id_token': 0, 'access_token': 0, 'refresh_token': 0}; control '"type"': 1
+files under /home/sandbox holding a codex token: {'id_token': 0, 'access_token': 0, 'refresh_token': 0}; control 'PS1': 1
+codex tokens in the decompressed git objects: {'id_token': 0, 'access_token': 0, 'refresh_token': 0}; control 'statiker fixtures': 1

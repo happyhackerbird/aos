@@ -1,0 +1,10 @@
+20:02:54 bus pid 64154 on 8016
+20:02:56 tasks codex=AO-1 pi=AO-2 omp=AO-3
+20:02:56 run codex AO-1
+20:04:11 codex exit 1
+20:04:11 run pi AO-2
+20:05:17 pi exit 1
+20:05:17 run omp AO-3
+20:06:57 omp exit 1
+20:06:58 bus stopped
+20:06:58 done

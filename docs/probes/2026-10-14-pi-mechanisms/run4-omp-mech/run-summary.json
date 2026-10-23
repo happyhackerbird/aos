@@ -1,0 +1,84 @@
+{
+  "name": "pim-omp-mech",
+  "flavour": "omp",
+  "mode": "mech",
+  "model": "openai-codex/gpt-6-luna",
+  "phrases": {
+    "probe-skill": "PHRASE-PROBE-d0d3d5",
+    "probe-skill-home": "PHRASE-HOME-9d38c1",
+    "repo-skill": "PHRASE-REPO-8561f7"
+  },
+  "auth": "PiAuth(expires_ms=1792687336000, expiry_source='jwt')",
+  "codeword": "CODEWORD-6b7b50",
+  "session_id": null,
+  "command": "PI_CODING_AGENT_DIR=/tmp/pi-agent HOME=/tmp/pi-home omp --print --mode json --model openai-codex/gpt-6-luna --session-dir /sandbox/pi-sessions --no-extensions --no-rules --no-title --max-time 2700 --approval-mode=yolo -e /sandbox/plugins/pi-probe/index.ts --config /sandbox/plugins/pi-probe/overlay-isolation.yml --skills=probe-*,repo-*",
+  "effective_policy_problems": [],
+  "harness_seconds": 127.0,
+  "gateway_denied_lines": 22,
+  "harness_rc": "0",
+  "timeline": [
+    {
+      "t": 1792016173.811,
+      "event": "sandbox.created",
+      "name": "pim-omp-mech",
+      "image": "aos-harness:comms"
+    },
+    {
+      "t": 1792016173.913,
+      "event": "policy.effective",
+      "problems": []
+    },
+    {
+      "t": 1792016174.209,
+      "event": "fixtures.installed"
+    },
+    {
+      "t": 1792016174.444,
+      "event": "pi_auth.uploaded",
+      "path": "/tmp/pi-agent/agent.db"
+    },
+    {
+      "t": 1792016174.608,
+      "event": "prompt.uploaded"
+    },
+    {
+      "t": 1792016175.246,
+      "event": "job.released",
+      "bytes": 219840
+    },
+    {
+      "t": 1792016178.293,
+      "event": "harness.started"
+    },
+    {
+      "t": 1792016305.31,
+      "event": "harness.finished",
+      "seconds": 127.0
+    },
+    {
+      "t": 1792016306.253,
+      "event": "exec.reads_done"
+    },
+    {
+      "t": 1792016307.407,
+      "event": "downloads.done",
+      "files": [
+        "exec-reads.txt",
+        "harness.err",
+        "harness.out",
+        "harness.rc",
+        "probe-report.md"
+      ]
+    },
+    {
+      "t": 1792016307.449,
+      "event": "gateway.log_saved",
+      "lines": 421
+    },
+    {
+      "t": 1792016307.709,
+      "event": "sandbox.deleted",
+      "gone": true
+    }
+  ]
+}
