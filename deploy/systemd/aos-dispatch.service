@@ -1,0 +1,30 @@
+# AOS dispatcher (task-flow Part B): starts one runner per ready task on this host.
+#
+# Install: copy to /etc/systemd/system/aos-dispatch.service, adjust the two paths in ExecStart
+# (the runner environment file and the venv the aos CLI is installed in), then
+#   systemctl daemon-reload && systemctl enable --now aos-dispatch
+# Logs: `journalctl -u aos-dispatch -f` for the dispatcher; each runner writes
+# <AOS_DISPATCH_LOG_DIR>/<task>-<UTC stamp>.log. See docs/reference/operations.md.
+[Unit]
+Description=AOS dispatcher: starts a runner for each ready task on this host
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/aos-runner
+# systemd sets no HOME for a root service without User=. git (root's credential helper for a
+# private repository) and the openshell CLI (its gateway configuration) both read it.
+Environment=HOME=/root
+# The runner environment file uses `export KEY=value` lines; `set -a` exports plain lines too.
+ExecStart=/bin/bash -c 'set -a; . /root/aos-runner/runner.env; exec /root/aos-runner/.venv/bin/aos dispatch'
+Restart=on-failure
+RestartSec=10
+# Runners live in their own sessions. Stopping or restarting the unit signals the dispatcher
+# only; every runner keeps running and finishes its task on the bus.
+KillMode=process
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

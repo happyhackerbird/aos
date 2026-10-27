@@ -1,0 +1,8 @@
+[execution]
+fail_closed = true
+
+[filesystem]
+exclude = [".env", "secrets/**"]
+
+[network]
+allow = ["pypi.org:443", "files.pythonhosted.org:443"]

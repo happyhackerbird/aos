@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-os"
+version = "0.1.0"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = ["fastapi", "uvicorn[standard]", "httpx[socks]", "pydantic", "pydantic-settings", "psutil>=6", "PyYAML>=6", "argon2-cffi", "cryptography"]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio"]
+
+[project.scripts]
+aos = "agent_os.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["agent_os*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

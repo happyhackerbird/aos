@@ -1,0 +1,1 @@
+The page total is wrong. Run `bash verify.sh` to see the failure, fix the defect in app.py (keep the behaviour otherwise), make `pytest tests` and `bash verify.sh` pass, commit with message `fix total`, and reply with the commit hash.

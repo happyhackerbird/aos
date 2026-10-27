@@ -1,0 +1,11 @@
+services:
+  agent-os:
+    build: .
+    volumes:
+      - agent-os-data:/data
+    ports:
+      - "127.0.0.1:8010:8010"
+    env_file: .env
+    restart: unless-stopped
+volumes:
+  agent-os-data:

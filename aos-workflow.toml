@@ -1,0 +1,2 @@
+# Migrated verbatim from the production registry; used for repository-wide checks.
+test_command = "uv sync --extra dev && uv run --extra dev python -m pytest -q"
