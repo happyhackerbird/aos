@@ -74,6 +74,8 @@ def live_run(store: Store, repo: str = "repo-x") -> dict:
                            expected_spec_hash=task["spec_hash"],
                            effective_acceptance=task["acceptance"], acceptance_source="task")
     store.start_run(run["id"], run["claim_token"], base_commit="a", branch="b", worktree="/x")
+    store.update_receiver(run["id"], run["claim_token"], action="receiving",
+                          owner=run["id"], reason="native_start")
     return {"task": task["id"], "run": run["id"], "token": run["claim_token"]}
 
 
@@ -166,12 +168,14 @@ def test_operator_sends_an_unsolicited_message_and_the_agent_replies(store: Stor
     assert note["framed"] == (f'<operator-message id="operator-i1" to-task="{worker["task"]}">\n'
                               'use the staging key\n</operator-message>\nThis is from the operator.')
     assert [p["id"] for p in store.requests_for_run(worker["run"], worker["token"])] == ["operator-i1"]
-    with pytest.raises(TransitionError, match="stored"):
-        store.create_intent(worker["task"], worker["run"], worker["token"], kind="request", reply_to=note["id"], body="ok")
-    store.ack_intent(note["id"], worker["run"], worker["token"])
+    # SU3 D3: the answer is the agent's explicit act and is accepted from `stored`; the facts then
+    # show it was acknowledged and answered by the agent and never prepared by a helper.
     reply = store.create_intent(worker["task"], worker["run"], worker["token"], kind="request", reply_to=note["id"],
                                 body="ok, will do")
-    assert reply["to_task_id"] == "operator" and store.get_intent(note["id"])["state"] == "answered"
+    answered = store.get_intent(note["id"])
+    assert reply["to_task_id"] == "operator" and answered["state"] == "answered"
+    assert [(r["stage"], r["actor"], r["source"]) for r in answered["receipts"]] == [
+        ("stored", "bus", "store"), ("acknowledged", "agent", "reply"), ("answered", "agent", "reply")]
 
 
 def test_operator_rows_are_noticed_on_the_next_sweep_and_matched_by_notice(store: Store) -> None:
@@ -191,7 +195,7 @@ def test_operator_rows_are_noticed_on_the_next_sweep_and_matched_by_notice(store
     assert not store.mark_intent_notified(question["id"], "operator", chat_id="-200", message_id=99)
     # an agent's reply to the operator is itself noticed on the next sweep
     note = store.create_operator_intent(to_task_id=asker["task"], body="fyi")
-    store.ack_intent(note["id"], asker["run"], asker["token"])
+    store.ack_intent(note["id"], asker["run"], asker["token"], source="cli")
     reply = store.create_intent(asker["task"], asker["run"], asker["token"], kind="request", reply_to=note["id"],
                                 body="noted")
     notices = store.sweep_intents(now=datetime.now(timezone.utc), ack_seconds=900)
@@ -212,7 +216,7 @@ def test_intent_for_waiter_reads_the_request_and_its_replies(store: Store) -> No
     with pytest.raises(TransitionError, match="stale"):
         store.intent_for_waiter(question["id"], asker["run"], "wrong")
     other = live_run(store, "repo-other")
-    with pytest.raises(TransitionError, match="only the asking task"):
+    with pytest.raises(TransitionError, match="original asking run"):
         store.intent_for_waiter(question["id"], other["run"], other["token"])
     with pytest.raises(KeyError):
         store.intent_for_waiter("AO-9-i9", asker["run"], asker["token"])

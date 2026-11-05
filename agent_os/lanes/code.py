@@ -297,6 +297,11 @@ class CodeLane:
                 raise TransitionError("PR head changed, re-review")
             if task["spec_hash"] != run["spec_hash"]:
                 raise TransitionError("spec has changed since the run was claimed")
+            # Verification gates U2: before the integration check and any GitHub call. A PR GitHub already
+            # merged returned above through `unclosed` and is never refused here.
+            missing = self.store.missing_checks(run)
+            if missing:
+                self._refuse_merge(task, run, f"required checks missing: {', '.join(missing)}")
             if time.monotonic() < self.github_paused_until:
                 wait = math.ceil(self.github_paused_until - time.monotonic())
                 raise TransitionError(f"GitHub rate limited; retry in {wait} s")

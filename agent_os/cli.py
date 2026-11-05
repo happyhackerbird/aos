@@ -17,7 +17,7 @@ import agent_os.evidence as evidence
 import agent_os.gitops as gitops
 import agent_os.integrate as integrate
 import agent_os.interactions as interactions
-from agent_os.store import parse_scope_spec
+from agent_os.store import format_receipts, parse_scope_spec
 from agent_os.store import RUN_LIVE
 from agent_os.telegram import branch_url
 
@@ -256,7 +256,31 @@ def cmd_add(client: httpx.Client, args: argparse.Namespace) -> int:
         body["execution"] = args.execution
     if args.reviews is not None:
         body["reviews"] = args.reviews
+    if args.require:
+        body["required_checks"] = args.require
+    if args.regression_guard:
+        body["regression_guard"] = True
     return _emit(client.post("/tasks", json=body))
+
+
+def cmd_record_check(client: httpx.Client, args: argparse.Namespace) -> int:
+    """Verification gates U2: record a required check for the task's review run, against its exact head."""
+    body = {"name": args.name, "commit": args.commit, "status": "waived" if args.waive else "passed",
+            "note": args.note}
+    return _emit(client.post(f"/tasks/{args.id}/checks", json=body))
+
+
+def _check_lines(run: dict[str, Any]) -> list[str]:
+    lines = []
+    lost = run.get("test_changes") or []
+    if lost:
+        named = ", ".join(f"{entry['test']} ({entry['after']})" for entry in lost[:10])
+        lines.append(f"test changes: {len(lost)} passed before the agent and not after: {named}"
+                     + (f" and {len(lost) - 10} more" if len(lost) > 10 else ""))
+    for check in run.get("checks") or []:
+        detail = " ".join((check.get("detail") or "").splitlines())[:200]
+        lines.append(f"check {check['name']}: {check['state']}" + (f" ({detail})" if detail else ""))
+    return lines
 
 
 def cmd_list(client: httpx.Client, args: argparse.Namespace) -> int:
@@ -296,11 +320,14 @@ def _format_intent_lines(intent: dict[str, Any]) -> list[str]:
         lines.append(f"assessment {intent.get('id')}: {intent.get('assessment')} about "
                      f"{intent.get('about_intent')}{suffix}")
     else:
+        # SU3 D10: the receipt facts, each with its actor and source, replace the unqualified
+        # via/delivered/acked/attempts fields; `state` stays as the summary.
         line = (f"intent {intent.get('id')}: {intent.get('state')} {intent.get('task_id')} -> "
                 f"{intent.get('to_task_id')} created={intent.get('created_at')} "
-                f"via={intent.get('delivered_via')} delivered={intent.get('delivered_at')} "
-                f"acked={intent.get('acked_at')} answered={intent.get('answered_at')} "
-                f"attempts={intent.get('delivery_attempts')}")
+                f"receipts=[{format_receipts(intent.get('receipts') or [])}] "
+                f"answered={intent.get('answered_at')} admission={intent.get('admission')} "
+                f"to_run_id={intent.get('to_run_id')} terminal_reason={intent.get('terminal_reason')} "
+                f"terminal_at={intent.get('terminal_at')}")
         if intent.get("reply_to"):
             line += f" reply_to={intent['reply_to']}"
         line += suffix
@@ -446,6 +473,10 @@ def cmd_show(client: httpx.Client, args: argparse.Namespace) -> int:
     runs = task.get("runs", [])
     for key in TASK_FIELDS:
         print(f"{key}: {task.get(key)}")
+    if task.get("required_checks"):
+        print(f"required_checks: {', '.join(task['required_checks'])}")
+    if task.get("regression_guard"):
+        print("regression_guard: True")
     for run in runs:
         report = " ".join((run.get("report") or "").splitlines())[:200]
         line = (f"run {run.get('id')}: status={run.get('status')} verdict={run.get('verdict')} "
@@ -473,6 +504,8 @@ def cmd_show(client: httpx.Client, args: argparse.Namespace) -> int:
             print(f"integration {integration['id']}: {integration['status']} "
                   f"head={integration['head_sha']} base={integration['base_branch']}@{integration['base_sha']} "
                   f"at={integration['created_at']}")
+        for line in _check_lines(run):
+            print(line)
     family_response = client.get(f"/tasks/{args.id}/family")
     if family_response.status_code == 404:
         pass
@@ -581,6 +614,12 @@ def cmd_review(client: httpx.Client, args: argparse.Namespace) -> int:
     print("flags: " + ("none" if not found else ""))
     for flag in found:
         print(f"  {flag}")
+    for line in _check_lines(run):
+        print(line)
+    missing = [check["name"] for check in run.get("checks") or [] if check["state"] not in ("passed", "waived")]
+    if run.get("status") == "review" and missing:
+        print(f"required checks missing: {', '.join(missing)} "
+              f"(aos record-check {args.id} <name> --commit <head> --note TEXT)")
     if run.get("status") == "review":
         print(f"accept: aos accept {args.id}")
         print(f"merge: aos merge {args.id}")
@@ -610,29 +649,64 @@ def cmd_attach(client: httpx.Client, args: argparse.Namespace) -> int:
         print("aos attach takes a run id (AO-<n>-r<k>), not a task id; see aos show AO-<n>", file=sys.stderr)
         return 2
     task_id = args.run.rsplit("-r", 1)[0]
-    response = client.get(f"/tasks/{task_id}")
-    if response.status_code >= 400:
-        _print_error(response)
-        return 1
-    run = next((run for run in response.json().get("runs", []) if run["id"] == args.run), None)
-    if run is None:
-        print(f"no run {args.run}", file=sys.stderr)
-        return 1
-    if run.get("status") not in RUN_LIVE:
-        print(f"run {args.run} is {run.get('status')}, not live", file=sys.stderr)
-        return 1
-    if run.get("execution") != "interactive":
-        print(f"run {args.run} is headless; only an interactive run can be attached", file=sys.stderr)
-        return 1
-    if run.get("stage") != "harness":
-        print(f"run {args.run} is past its harness stage ({run.get('stage')}); its session is closed",
-              file=sys.stderr)
-        return 1
-    worktree = run.get("worktree")
-    if not (worktree or "").startswith("openshell:"):
-        print(f"run {args.run} has no OpenShell sandbox (worktree {worktree})", file=sys.stderr)
-        return 1
-    sandbox = worktree[len("openshell:"):]
+    deadline = time.monotonic() + 60
+    waiting = False
+    while True:
+        response = client.get(f"/tasks/{task_id}")
+        if response.status_code >= 400:
+            _print_error(response)
+            return 1
+        run = next((run for run in response.json().get("runs", []) if run["id"] == args.run), None)
+        if run is None:
+            print(f"no run {args.run}", file=sys.stderr)
+            return 1
+        if run.get("status") not in RUN_LIVE:
+            print(f"run {args.run} is {run.get('status')}, not live", file=sys.stderr)
+            return 1
+        if run.get("execution") != "interactive":
+            print(f"run {args.run} is headless; only an interactive run can be attached", file=sys.stderr)
+            return 1
+        if run.get("stage") != "harness":
+            print(f"run {args.run} is past its harness stage ({run.get('stage')}); its session is closed",
+                  file=sys.stderr)
+            return 1
+        worktree = run.get("worktree")
+        if not (worktree or "").startswith("openshell:"):
+            print(f"run {args.run} has no OpenShell sandbox (worktree {worktree})", file=sys.stderr)
+            return 1
+        sandbox = worktree[len("openshell:"):]
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            print(f"timed out waiting for run {args.run}'s tmux session after 60 seconds", file=sys.stderr)
+            return 1
+        try:
+            probe = _sandbox_command(
+                ["openshell", "sandbox", "exec", "-n", sandbox, "--no-tty", "--no-login-shell", "--",
+                 "/usr/bin/tmux", "-S", TMUX_SOCKET, "has-session", "-t", TMUX_SESSION],
+                capture_output=True, text=True, timeout=remaining)
+        except subprocess.TimeoutExpired:
+            print(f"timed out waiting for run {args.run}'s tmux session after 60 seconds", file=sys.stderr)
+            return 1
+        except OSError as exc:
+            print(f"openshell is not available on this host: {exc}", file=sys.stderr)
+            return 1
+        if probe.returncode == 0:
+            break
+        absent = probe.returncode == 1 and probe.stderr.strip() in {
+            f"error connecting to {TMUX_SOCKET} (No such file or directory)",
+            f"error connecting to {TMUX_SOCKET} (Connection refused)",
+            f"no server running on {TMUX_SOCKET}",
+            f"can't find session: {TMUX_SESSION}",
+            "no sessions",
+        }
+        if not absent:
+            detail = probe.stderr.strip() or probe.stdout.strip() or f"exit {probe.returncode}"
+            print(f"cannot probe run {args.run}'s tmux session: {detail}", file=sys.stderr)
+            return 1
+        if not waiting:
+            print(f"waiting for run {args.run}'s tmux session (up to 60 seconds)...", file=sys.stderr)
+            waiting = True
+        time.sleep(max(0, min(1, deadline - time.monotonic())))
     try:
         if args.takeover:
             _sandbox_command(["openshell", "sandbox", "exec", "-n", sandbox, "--no-tty", "--no-login-shell", "--",
@@ -642,6 +716,9 @@ def cmd_attach(client: httpx.Client, args: argparse.Namespace) -> int:
                 *(["-w", "5"] if args.takeover else ["-n"]), "-E", str(ATTACH_BUSY), ATTACH_LOCK,
                 "/usr/bin/tmux", "-S", TMUX_SOCKET, "attach-session", "-t", TMUX_SESSION]
         code = _attach_run(argv)
+    except subprocess.TimeoutExpired:
+        print(f"timed out detaching run {args.run}'s tmux client", file=sys.stderr)
+        return 1
     except OSError as exc:
         print(f"openshell is not available on this host: {exc}", file=sys.stderr)
         return 1
@@ -722,16 +799,6 @@ def cmd_interactions(client: httpx.Client, args: argparse.Namespace) -> int:
                                          environ=os.environ, out=sys.stdout, err=sys.stderr)
 
 
-def _has_no_live_run(client: httpx.Client, task_id: str) -> bool:
-    """Advisory lookup after an operator message is stored: True only when the bus answers and
-    none of the task's runs is live. A failed lookup is False, so nothing more is printed."""
-    try:
-        response = client.get(f"/tasks/{task_id}")
-    except httpx.HTTPError:
-        return False
-    if response.status_code != 200:
-        return False
-    return not any(run.get("status") in ("claimed", "running") for run in response.json().get("runs", []))
 
 
 def _ask_operator(client: httpx.Client, args: argparse.Namespace) -> int:
@@ -747,14 +814,13 @@ def _ask_operator(client: httpx.Client, args: argparse.Namespace) -> int:
         _print_error(response)
         return 1
     row = response.json()
-    line = f"{row['id']} {row['state']} -> {row['to_task_id']}"
+    line = (f"{row['id']} {row['state']} -> {row['to_task_id']} admission={row.get('admission')} "
+            f"to_run_id={row.get('to_run_id')} terminal_reason={row.get('terminal_reason')} "
+            f"terminal_at={row.get('terminal_at')}")
     if args.reply:
-        line += f" (answers {row['reply_to']})"
+        line += f" (answer recorded for {row['reply_to']}; reply admission shown above)"
     print(line)
-    lookup = row.get("to_task_id") if args.reply else args.target
-    if lookup and _has_no_live_run(client, lookup):
-        print(f"no live run on {row['to_task_id']}; the message waits on the bus until a run pulls its inbox")
-    return 0
+    return 2 if row.get("admission") == "unavailable" else 0
 
 
 def cmd_ask(client: httpx.Client, args: argparse.Namespace) -> int:
@@ -772,7 +838,10 @@ def cmd_ask(client: httpx.Client, args: argparse.Namespace) -> int:
         body["to_task_id"] = args.target
     body["body"] = args.text
     response = client.post(f"/tasks/{run_json['task_id']}/intents", json=body)
-    return _emit(response)
+    result = _emit(response)
+    if result == 0 and response.json().get("admission") == "unavailable":
+        return 2
+    return result
 
 
 def cmd_requests(client: httpx.Client, args: argparse.Namespace) -> int:
@@ -795,6 +864,15 @@ def cmd_requests(client: httpx.Client, args: argparse.Namespace) -> int:
     blocks = texts + list(overlaps)
     if blocks:
         print("\n\n".join(blocks))
+    # SU3 D5a: printing is this host's preparation of the row; report exactly that, best-effort,
+    # after the output. It is not an acknowledgement -- `aos ack` is.
+    for row in rows:
+        receipt = client.post(f"/intents/{row['id']}/receipt", json={
+            "run_id": run_json["run_id"], "claim_token": run_json["claim_token"],
+            "stage": "prepared", "source": "cli"})
+        if receipt.status_code >= 400:
+            print(f"receipt for {row['id']} not recorded: {receipt.status_code}; it may be shown again",
+                  file=sys.stderr)
     return 0
 
 
@@ -804,7 +882,8 @@ def cmd_ack(client: httpx.Client, args: argparse.Namespace) -> int:
     if run_json is None:
         return _no_run_json(worktree)
     response = client.post(f"/intents/{args.intent_id}/ack",
-                           json={"run_id": run_json["run_id"], "claim_token": run_json["claim_token"]})
+                           json={"run_id": run_json["run_id"], "claim_token": run_json["claim_token"],
+                                 "source": "cli"})
     return _emit(response)
 
 
@@ -942,6 +1021,12 @@ def build_parser() -> argparse.ArgumentParser:
     add_p.add_argument("--title", required=True)
     _add_spec_flags(add_p)
     add_p.add_argument("--reviews", help="a task of the same repository this task reviews; its run gets that task's ao/ branch")
+    add_p.add_argument("--require", action="append", metavar="NAME",
+                       help="a check that must be on record for the run's head before accept or merge (repeatable; "
+                            "added to the repository's required_checks); merge-check is computed from aos integrate")
+    add_p.add_argument("--regression-guard", action="store_true",
+                       help="run even when the acceptance commands already pass before the agent (with baseline on, "
+                            "such a task otherwise ends before the agent starts)")
     add_p.set_defaults(func=cmd_add)
 
     list_p = sub.add_parser("list")
@@ -988,6 +1073,15 @@ def build_parser() -> argparse.ArgumentParser:
     review_p.add_argument("id")
     review_p.add_argument("--run")
     review_p.set_defaults(func=cmd_review)
+
+    record_check_p = sub.add_parser("record-check", help="record a required check for the task's review run")
+    record_check_p.add_argument("id")
+    record_check_p.add_argument("name")
+    record_check_p.add_argument("--commit", required=True,
+                                help="the review run's head, all 40 characters (its PR head, else its result commit)")
+    record_check_p.add_argument("--waive", action="store_true", help="record the check as waived, not passed")
+    record_check_p.add_argument("--note", required=True, help="what was checked and where the evidence is")
+    record_check_p.set_defaults(func=cmd_record_check)
 
     for verb in ("unready", "cancel"):
         verb_p = sub.add_parser(verb)

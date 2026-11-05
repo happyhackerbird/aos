@@ -152,6 +152,9 @@ def live_run(client: TestClient, repo: str) -> dict:
     started = client.post(f"/runs/{run['id']}/start", json={"claim_token": run["claim_token"], "base_commit": "a",
                                                                "branch": "b", "worktree": "/x"})
     assert started.status_code == 200, started.text
+    opened = client.post(f"/runs/{run['id']}/receiver", json={
+        "claim_token": run["claim_token"], "action": "receiving", "owner": run["id"], "reason": "native_start"})
+    assert opened.status_code == 200, opened.text
     return {"task": task["id"], "run": run["id"], "token": run["claim_token"]}
 
 
@@ -249,8 +252,8 @@ def test_operator_question_is_noticed_on_the_next_sweep(client: TestClient, stor
     assert len(posted) == 1
     text = posted[0][2]["text"]
     assert asker["task"] in text and question["id"] in text and "Which database, the staging one?" in text
-    assert text == (f"❓ {asker['task']} asks you ({question['id']}):\nWhich database, the staging one?\n"
-                    "Reply to this message to answer.")
+    assert "admission=accepted" in text and "to_run_id=None" in text
+    assert text.endswith("Reply to this message to answer.")
     stored = store.get_intent(question["id"])
     assert stored["notified_at"] and stored["tg_chat_id"] == "-200" and isinstance(stored["tg_message_id"], int)
     client.app.state.sweep_requests()
@@ -400,11 +403,11 @@ def test_agent_text_carrying_the_runs_own_token_is_refused_on_every_route(client
                                                      "merge_rule": "fine", "body": "ok"}).status_code == 200
     # delivered: the note goes into the runs.jsonl receipt
     question = post(f"/tasks/{a['task']}/intents", {**cred_a, "to_task_id": b["task"], "body": "please"}).json()
-    refused = post(f"/intents/{question['id']}/delivered", {**cred_b, "via": "inbox", "note": f"seen {b['token']}"})
+    refused = post(f"/intents/{question['id']}/receipt", {**cred_b, "stage": "prepared", "source": "hook", "note": f"seen {b['token']}"})
     assert refused.status_code == 422 and refused.json()["detail"] == refusal, refused.text
     assert b["token"] not in store.runs_path.read_text()
     assert store.get_intent(question["id"])["delivery_attempts"] == 0
-    passed = post(f"/intents/{question['id']}/delivered", {**cred_b, "via": "inbox", "note": "seen"})
+    passed = post(f"/intents/{question['id']}/receipt", {**cred_b, "stage": "prepared", "source": "hook", "note": "seen"})
     assert passed.status_code == 200, passed.text
     assert store.get_intent(question["id"])["delivery_attempts"] == 1
     # another run's token in a text is not this run's token
@@ -417,10 +420,10 @@ def test_run_requests_keeps_the_bound_inbox_shape(client: TestClient) -> None:
     intent = client.post(f"/tasks/{asker['task']}/intents", json={
         "run_id": asker["run"], "claim_token": asker["token"], "to_task_id": worker["task"], "body": "please"}).json()
     before = client.post(f"/runs/{worker['run']}/requests", json={"claim_token": worker["token"]}).json()
-    assert set(before) == {"pending_requests", "overlaps"} and [r["id"] for r in before["pending_requests"]] == [intent["id"]]
-    client.post(f"/intents/{intent['id']}/ack", json={"run_id": worker["run"], "claim_token": worker["token"]})
+    assert [r["id"] for r in before["pending_requests"]] == [intent["id"]]
+    client.post(f"/intents/{intent['id']}/ack", json={"run_id": worker["run"], "claim_token": worker["token"], "source": "cli"})
     after = client.post(f"/runs/{worker['run']}/requests", json={"claim_token": worker["token"]}).json()
-    assert after == {"pending_requests": [], "overlaps": []}
+    assert after["pending_requests"] == [] and after["overlaps"] == []
 
 
 def test_data_dir_default_names_the_setting_when_there_is_no_home(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -5,10 +5,15 @@ No real Pi, omp, network or credential is used; tokens are synthetic.
 from __future__ import annotations
 
 import base64
+import io
 import json
 import os
+import re
+import shutil
 import subprocess
+import sys
 import time
+import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -185,6 +190,89 @@ def test_diagnostics_never_echo_payloads():
     records[-1] = {"type": "agent_settled", "aborted": False, "detail": secret}
     result = pi.parse_output(stream(*records), 0, SID)
     assert secret not in result.error and len(result.error) < 200
+
+
+@pytest.mark.parametrize("parser", [pi.parse_output, pi.parse_omp_output], ids=["pi", "omp"])
+@pytest.mark.parametrize("returncode", [0, 1, None])
+def test_line_iterators_match_bytes_contract(parser, returncode):
+    """Exercise single-pass generators, binary files, blank lines and unterminated final lines."""
+    cases = [
+        b"", b" \r\n\t\n",
+        stream(*ok_run(assistant("stop", "hello\n", "é"))),
+        stream(*ok_run())[:-1],
+        b"\n \t\r\n" + stream(*ok_run()) + b"\n\t\n",
+        stream(*ok_run()[:-1]),
+        stream(*ok_run(assistant("error"))),
+        stream(*ok_run(assistant(None))),
+        stream(*ok_run(assistant("stop", " \n"))),
+        stream(*ok_run(None, {"type": "auto_retry_start"})),
+        stream(*ok_run(), {"type": "notice"}),
+        stream(*ok_run(), {"type": "agent_settled", "aborted": True}),
+        stream(*ok_run(), {"type": "session", "id": SID}),
+        stream(*ok_run(), session=None),
+        stream(*ok_run(), session="not-a-uuid"),
+        stream(*ok_run(), session=OTHER),
+        stream(*ok_run()) + b'{"type":',
+        stream(*ok_run()) + b"\xff\n",
+        stream(*ok_run()) + b"[]\n",
+        stream(*ok_run()) + b'{"type": ""}\n',
+    ]
+    for messages in (None, [], ["not a message"], [{"role": "user"}]):
+        cases.append(stream({"type": "agent_end", "messages": messages},
+                            {"type": "agent_settled", "aborted": False}))
+    for raw in cases:
+        expected = parser(raw, returncode, SID)
+        assert parser((part for part in raw.split(b"\n")), returncode, SID) == expected
+        assert parser(io.BytesIO(raw), returncode, SID) == expected
+
+
+@pytest.mark.parametrize("parser", [pi.parse_output, pi.parse_omp_output], ids=["pi", "omp"])
+def test_streaming_parser_100_mib_bounded_memory(parser):
+    """Exactly 100 MiB, generated lazily; ordinary agent_end lines are exactly 4 KiB."""
+    total_bytes = 100 * 1024 * 1024
+    final_text = "x" * (pi.TEXT_TAIL + 10000) + "END"
+    emitted_bytes = 0
+    largest_line = 0
+
+    def events():
+        nonlocal emitted_bytes, largest_line
+        header = line({"type": "session", "id": SID})
+        final = line({"type": "agent_end", "messages": [assistant("stop", final_text)]})
+        settled = line({"type": "agent_settled", "aborted": False}) if parser is pi.parse_output else b""
+        empty = line({"type": "agent_end", "messages": [assistant("stop", "")]})
+
+        def padded_event(size):
+            return line({"type": "agent_end", "messages": [assistant("stop", "x" * (size - len(empty)))]})
+
+        remaining = total_bytes - len(header) - len(final) - len(settled)
+        count, remainder = divmod(remaining, 4096)
+        yield header
+        for _ in range(count - 1):
+            yield padded_event(4096)
+        yield padded_event(4096 + remainder)
+        yield final
+        if settled:
+            yield settled
+
+    def measured_lines():
+        nonlocal emitted_bytes, largest_line
+        for event in events():
+            emitted_bytes += len(event)
+            largest_line = max(largest_line, len(event))
+            yield event
+
+    tracemalloc.start()
+    try:
+        result = parser(measured_lines(), 0, SID)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    print(f"{parser.__name__}: {emitted_bytes} bytes; largest line {largest_line} bytes; "
+          f"tracemalloc peak {peak} bytes ({peak / 1024 / 1024:.3f} MiB)")
+    assert emitted_bytes == total_bytes
+    assert largest_line < 32 * 1024
+    assert peak < 32 * 1024 * 1024
+    assert result == pi.PiResult(final_text, SID, None, "stop", True)
 
 
 # -- omp event contract (measured live 2026-10-12: omp 18.8.3 emits no agent_settled) -------------
@@ -392,6 +480,241 @@ def test_ensure_validity_recheck(tmp_path, monkeypatch):
         pi.ensure_validity(auth, 300)
 
 
+# -- persistent worker login (omp store, renewed by `omp token --force-refresh`) --------------------
+
+FAKE_OMP = r"""#!{python}
+# Stands in for `omp token openai-codex --force-refresh`: an OAuth server in server.json that rotates the refresh
+# token on every use and refuses a stale one, writing back into PI_CODING_AGENT_DIR/agent.db as omp does.
+import base64, json, os, sqlite3, sys, time
+def b64(d): return base64.urlsafe_b64encode(json.dumps(d).encode()).decode().rstrip("=")
+assert sys.argv[1:] == ["token", "openai-codex", "--force-refresh"], sys.argv
+assert sys.stdin.read() == ""
+home = os.environ["PI_CODING_AGENT_DIR"]
+server_path = os.path.join(os.path.dirname(home), "server.json")
+server = json.load(open(server_path))
+with open(os.path.join(os.path.dirname(home), "calls.log"), "a") as log:
+    log.write("refresh\n")
+time.sleep(server.get("delay", 0))
+db = sqlite3.connect(os.path.join(home, "agent.db"))
+cid, data = db.execute("SELECT id, data FROM auth_credentials WHERE disabled_cause IS NULL").fetchone()
+entry = json.loads(data)
+if server["mode"] == "outage" or entry["refresh"] != server["refresh"]:
+    db.execute("INSERT OR REPLACE INTO auth_credential_blocks VALUES (?, 'openai-codex:oauth', 'auth', ?, 0)",
+               (cid, int((time.time() + 300) * 1000)))
+    db.commit()
+    reason = "fetch failed: connect ECONNREFUSED" if server["mode"] == "outage" else "invalid_grant"
+    sys.stderr.write(f"refresh failed: {{reason}} for refresh_token={{entry['refresh']}} access={{entry['access']}}\n"
+                     'No active credential found for provider "openai-codex".\n')
+    sys.exit(1)
+n = server["issued"] = server.get("issued", 0) + 1
+exp = int(time.time() + server["lifetime"])
+access = f"{{b64({{'alg': 'none'}})}}.{{b64({{'exp': exp, 'n': n}})}}.c2ln"
+server["refresh"] = f"rt-rotated-{{n}}-secret-value"
+entry.update(access=access, refresh=server["refresh"], expires=exp * 1000)
+db.execute("UPDATE auth_credentials SET data = ? WHERE id = ?", (json.dumps(entry), cid))
+db.commit()
+json.dump(server, open(server_path, "w"))
+print(access)
+"""
+
+
+def login_dir(tmp_path: Path, *, expires_in: float = -60, refresh: str = "rt-host-refresh-secret",
+              account: str = "acct-worker-1", lifetime: float = 864000, mode: str = "ok", rows: int = 1,
+              disabled: str | None = None, delay: float = 0) -> tuple[Path, str]:
+    import sqlite3
+
+    home = tmp_path / "omp-login"
+    home.mkdir(mode=0o700)
+    now = time.time()
+    conn = sqlite3.connect(home / "agent.db")
+    conn.execute("CREATE TABLE auth_credentials (id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, "
+                 "credential_type TEXT NOT NULL, data TEXT NOT NULL, disabled_cause TEXT DEFAULT NULL, "
+                 "identity_key TEXT DEFAULT NULL, created_at INTEGER NOT NULL DEFAULT 0, "
+                 "updated_at INTEGER NOT NULL DEFAULT 0)")
+    conn.execute("CREATE TABLE auth_credential_blocks (credential_id INTEGER NOT NULL, provider_key TEXT NOT NULL, "
+                 "block_scope TEXT NOT NULL DEFAULT '', blocked_until_ms INTEGER NOT NULL, updated_at INTEGER NOT NULL, "
+                 "PRIMARY KEY (credential_id, provider_key, block_scope))")
+    for _ in range(rows):
+        entry = {"access": jwt(now + expires_in), "refresh": refresh, "expires": int((now + expires_in) * 1000),
+                 "accountId": account, "email": "worker@example.invalid"}
+        conn.execute("INSERT INTO auth_credentials (provider, credential_type, data, disabled_cause) VALUES (?, ?, ?, ?)",
+                     ("openai-codex", "oauth", json.dumps(entry), disabled))
+    conn.commit()
+    conn.close()
+    (tmp_path / "server.json").write_text(json.dumps({"mode": mode, "refresh": refresh, "lifetime": lifetime,
+                                                      "delay": delay}))
+    fake = tmp_path / "fake-omp"
+    fake.write_text(FAKE_OMP.format(python=sys.executable))
+    fake.chmod(0o755)
+    return home, str(fake)
+
+
+def refresh_calls(tmp_path: Path) -> int:
+    log = tmp_path / "calls.log"
+    return len(log.read_text().splitlines()) if log.exists() else 0
+
+
+def stored(home: Path) -> dict:
+    import sqlite3
+
+    with sqlite3.connect(home / "agent.db") as conn:
+        return json.loads(conn.execute("SELECT data FROM auth_credentials").fetchone()[0])
+
+
+def test_login_auth_valid_login_is_used_without_refresh(tmp_path):
+    home, fake = login_dir(tmp_path, expires_in=86400)
+    auth = pi.login_auth(str(home), 900, bin=fake)
+    assert refresh_calls(tmp_path) == 0 and auth.origin == "login" and auth.account_id == "acct-worker-1"
+    assert "rt-host-refresh-secret" in auth.secrets
+    assert b"rt-host-refresh-secret" not in auth.omp_store_snapshot() and b"rt-host" not in auth.snapshot()
+
+
+def test_login_auth_renews_expired_token_and_persists_rotation(tmp_path):
+    home, fake = login_dir(tmp_path, expires_in=-60)
+    auth = pi.login_auth(str(home), 900, bin=fake)
+    assert refresh_calls(tmp_path) == 1
+    assert auth.expires_ms / 1000 > time.time() + 800000 and auth.expiry_source == "jwt"
+    assert stored(home)["refresh"] == "rt-rotated-1-secret-value" == json.loads((tmp_path / "server.json").read_text())["refresh"]
+    assert "rt-rotated-1-secret-value" in auth.secrets
+    snapshot = json.loads(auth.snapshot())["openai-codex"]
+    assert snapshot["refresh"] == pi.PLACEHOLDER_REFRESH and snapshot["access"] == auth.access
+    assert b"rt-rotated" not in auth.omp_store_snapshot()
+
+
+def test_login_auth_renews_a_token_short_of_the_horizon(tmp_path):
+    home, fake = login_dir(tmp_path, expires_in=600)  # valid, but not for 900 s
+    assert pi.login_auth(str(home), 900, bin=fake).expires_ms / 1000 > time.time() + 900
+    assert refresh_calls(tmp_path) == 1
+
+
+def test_login_auth_rotated_refresh_token_stays_usable(tmp_path):
+    """Each renewal rotates the refresh token and the server refuses a stale one: the second renewal must use
+    the token omp persisted after the first."""
+    home, fake = login_dir(tmp_path, lifetime=600)  # the first issued token falls short of 900 s
+    with pytest.raises(pi.AuthError, match="does not cover the run"):
+        pi.login_auth(str(home), 900, bin=fake)
+    assert stored(home)["refresh"] == "rt-rotated-1-secret-value"
+    server = json.loads((tmp_path / "server.json").read_text())
+    (tmp_path / "server.json").write_text(json.dumps({**server, "lifetime": 864000}))
+    auth = pi.login_auth(str(home), 900, bin=fake)
+    assert refresh_calls(tmp_path) == 2 and stored(home)["refresh"] == "rt-rotated-2-secret-value"
+    assert auth.access == stored(home)["access"]
+    assert pi.login_auth(str(home), 900, bin=fake).access == auth.access and refresh_calls(tmp_path) == 2
+
+
+def test_login_auth_concurrent_admissions_refresh_once(tmp_path):
+    import threading
+
+    home, fake = login_dir(tmp_path, delay=0.5)
+    results: list = []
+    barrier = threading.Barrier(4)
+
+    def admit():
+        barrier.wait()
+        try:
+            results.append(pi.login_auth(str(home), 900, bin=fake).access)
+        except pi.AuthError as exc:
+            results.append(exc)
+
+    threads = [threading.Thread(target=admit) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert refresh_calls(tmp_path) == 1
+    assert len(results) == 4 and len(set(results)) == 1 and results[0] == stored(home)["access"]
+
+
+def test_login_auth_lock_timeout_leaves_the_store_alone(tmp_path):
+    import fcntl
+
+    home, fake = login_dir(tmp_path)
+    holder = os.open(home / pi.LOGIN_LOCK, os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(holder, fcntl.LOCK_EX)
+    try:
+        with pytest.raises(pi.AuthError, match="renewal lock"):
+            pi.login_auth(str(home), 900, bin=fake, lock_timeout=0.3)
+    finally:
+        os.close(holder)
+    assert refresh_calls(tmp_path) == 0
+
+
+@pytest.mark.parametrize("mode, phrase", [("outage", "ECONNREFUSED"), ("revoked", "invalid_grant")])
+def test_login_auth_refresh_failure_is_sanitized_and_actionable(tmp_path, mode, phrase):
+    home, fake = login_dir(tmp_path, mode=mode)
+    if mode == "revoked":  # the server already rotated past the host's token
+        server = json.loads((tmp_path / "server.json").read_text())
+        (tmp_path / "server.json").write_text(json.dumps({**server, "refresh": "rt-someone-else"}))
+    before = stored(home)
+    with pytest.raises(pi.AuthError) as info:
+        pi.login_auth(str(home), 900, bin=fake)
+    message = str(info.value)
+    assert phrase in message and "omp token exited 1" in message and "omp holds the credential back until" in message
+    assert "omp login openai-codex" in message and "auth.openai.com:443" in message
+    assert "rt-host-refresh-secret" not in message and before["access"] not in message
+    assert "[REDACTED]" in message and len(message) < 900
+    assert stored(home) == before
+
+
+@pytest.mark.parametrize("change, phrase", [
+    ({"rows": 0}, "no openai-codex OAuth login; log the worker in again"),
+    ({"rows": 2}, "2 active openai-codex accounts"),
+    ({"disabled": "oauth revoked"}, "omp disabled the worker's openai-codex login (oauth revoked)"),
+])
+def test_login_auth_store_refusals(tmp_path, change, phrase):
+    home, fake = login_dir(tmp_path, **change)
+    with pytest.raises(pi.AuthError, match=re.escape(phrase)):
+        pi.login_auth(str(home), 900, bin=fake)
+    assert refresh_calls(tmp_path) == 0
+
+
+def test_login_auth_directory_rules(tmp_path):
+    home, fake = login_dir(tmp_path)
+    with pytest.raises(pi.AuthError, match="not a readable directory"):
+        pi.login_auth(str(tmp_path / "missing"), 900, bin=fake)
+    home.chmod(0o750)
+    with pytest.raises(pi.AuthError, match="private"):
+        pi.login_auth(str(home), 900, bin=fake)
+    home.chmod(0o700)
+    link = tmp_path / "link"
+    link.symlink_to(home)
+    with pytest.raises(pi.AuthError, match="symlink"):
+        pi.login_auth(str(link), 900, bin=fake)
+    (home / "agent.db").unlink()
+    with pytest.raises(pi.AuthError, match="holds no agent.db"):
+        pi.login_auth(str(home), 900, bin=fake)
+
+
+def test_login_auth_missing_host_omp(tmp_path):
+    home, _ = login_dir(tmp_path)
+    with pytest.raises(pi.AuthError, match="is not on this host"):
+        pi.login_auth(str(home), 900, bin=str(tmp_path / "no-omp"))
+
+
+def test_login_auth_account_change_refused(tmp_path):
+    home, fake = login_dir(tmp_path)
+    script = Path(fake).read_text().replace('entry.update(access=access,', 'entry.update(accountId="acct-other", access=access,')
+    Path(fake).write_text(script)
+    with pytest.raises(pi.AuthError, match="different accountId"):
+        pi.login_auth(str(home), 900, bin=fake)
+
+
+@pytest.mark.skipif(shutil.which("omp") is None, reason="omp is not installed")
+def test_real_omp_reads_the_store_login_auth_reads(tmp_path):
+    """The store layout login_auth reads is the one omp 18.8.3 serves from (no network: the token is valid)."""
+    home = tmp_path / "omp-login"
+    home.mkdir(mode=0o700)
+    seed = pi.selected_auth(str(auth_file(tmp_path)))
+    (home / "agent.db").write_bytes(seed.omp_store_snapshot())
+    env = {**os.environ, "PI_CODING_AGENT_DIR": str(home), "HOME": str(tmp_path)}
+    env.pop("OMP_PROFILE", None)
+    out = subprocess.run(["omp", "token", "openai-codex"], env=env, capture_output=True, text=True, timeout=60,
+                         stdin=subprocess.DEVNULL)
+    assert out.returncode == 0, out.stderr
+    auth = pi.login_auth(str(home), 900, bin="omp")  # read back from the store omp has now migrated
+    assert out.stdout.strip() == auth.access == seed.access and auth.account_id == seed.account_id
+
+
 def test_redact_longest_first_and_placeholder_untouched(tmp_path):
     auth = pi.selected_auth(str(auth_file(tmp_path, {"accountId": "acct-worker-1", "refresh": "acct-worker-1-refresh"})))
     text = f"a={auth.access} r=acct-worker-1-refresh id=acct-worker-1 p={pi.PLACEHOLDER_REFRESH}"
@@ -551,9 +874,8 @@ def test_omp_comms_extension_is_last_after_operator_extensions():
 
 
 @pytest.mark.parametrize("flavour, model, session_id", [("pi", "gpt-6-luna", SID), ("omp", "test-model", None)])
-def test_comms_pull_keeps_the_aos_tools_and_drops_only_the_extension(flavour, model, session_id):
-    # AOS_OPENSHELL_COMMS=pull: the explicit path (MCP loading, the omp allowlist, the operator's extensions) as with
-    # comms on; the image-owned extension, the automatic path, is not loaded.
+def test_comms_pull_keeps_tools_and_lifecycle_extension_with_automatic_disabled(flavour, model, session_id):
+    # Pull suppresses delivery handlers, not the native owner lifecycle boundary.
     import shlex
     extensions = ("/sandbox/plugins/first.ts",)
     common = dict(bin=flavour, provider="openai-codex" if flavour == "pi" else None, model=model,
@@ -561,9 +883,10 @@ def test_comms_pull_keeps_the_aos_tools_and_drops_only_the_extension(flavour, mo
     on = shlex.split(pi.invocation(flavour, **common).command)
     pull = pi.invocation(flavour, **common, automatic=False)
     argv = shlex.split(pull.command)
-    assert "/usr/local/lib/aos-agent/aos_pi.ts" not in argv
-    assert on[-2:] == ["-e", "/usr/local/lib/aos-agent/aos_pi.ts"] and argv == on[:-2]
-    assert [argv[index + 1] for index, flag in enumerate(argv) if flag == "-e"][-1] == extensions[-1]
+    assert argv[-2:] == on[-2:] == ["-e", "/usr/local/lib/aos-agent/aos_pi.ts"]
+    assert "AOS_AGENT_AUTOMATIC=0" in argv and "AOS_AGENT_AUTOMATIC=1" in on
+    assert [arg for arg in argv if not arg.startswith("AOS_AGENT_AUTOMATIC=")] == [
+        arg for arg in on if not arg.startswith("AOS_AGENT_AUTOMATIC=")]
     if flavour == "pi":
         assert "--no-mcp" not in argv and argv[argv.index("builtin:mcp") - 1] == "-e"
     else:
@@ -575,7 +898,7 @@ def test_omp_interactive_invocation_has_no_print_mode_and_names_the_submit_tool(
     result = pi.invocation("omp", bin="omp", provider=None, model="openai-codex/gpt-6-luna", session_id=None,
                            harness_timeout=60, comms=True, interactive=True, extensions=("/sandbox/plugin.ts",))
     command = result.command
-    assert command == ("PI_CODING_AGENT_DIR=/tmp/pi-agent HOME=/tmp/pi-home omp --model openai-codex/gpt-6-luna "
+    assert command == ("PI_CODING_AGENT_DIR=/tmp/pi-agent HOME=/tmp/pi-home AOS_AGENT_AUTOMATIC=1 omp --model openai-codex/gpt-6-luna "
                        "--session-dir /sandbox/pi-sessions --no-extensions --no-skills --no-rules --no-title --max-time 60 "
                        "--approval-mode=yolo --config /tmp/pi-agent/interactive.yml --tools="
                        + ",".join(pi.OMP_TOOLS + pi.OMP_AOS_TOOLS_INTERACTIVE)
@@ -590,3 +913,9 @@ def test_pi_flavour_refuses_interactive():
     with pytest.raises(ValueError, match="interactive execution needs the omp flavour"):
         pi.invocation("pi", bin="pi", provider=None, model="gpt-6-luna", session_id=SID,
                       harness_timeout=60, interactive=True)
+    # SU4: both flavours load the shared adapter last while keeping tested versions and tool allowlists distinct.
+    assert pi.FLAVOURS["pi"].tested_versions == ("1.1.0",)
+    assert pi.FLAVOURS["omp"].tested_versions == ("18.8.3",)
+    assert {"wait", "task"} <= set(pi.OMP_TOOLS)
+    assert len(pi.OMP_AOS_TOOLS) == 6 and len(pi.OMP_AOS_TOOLS_INTERACTIVE) == 11
+

@@ -124,6 +124,17 @@ def test_final_message_unparseable_is_none(monkeypatch, raw):
     assert oe.final_message("sb", "codex") is None
 
 
+def test_final_message_devin_is_the_plain_stdout(monkeypatch):
+    monkeypatch.setattr(adapter, "sandbox_exec_direct_bytes", lambda *a, **k: done_bytes(b"Fixed the total.\n"))
+    assert oe.final_message("sb", "devin") == "Fixed the total."
+
+
+@pytest.mark.parametrize("raw", [b"", b"\n"])
+def test_final_message_devin_with_nothing_printed_is_none(monkeypatch, raw):
+    monkeypatch.setattr(adapter, "sandbox_exec_direct_bytes", lambda *a, **k: done_bytes(raw))
+    assert oe.final_message("sb", "devin") is None
+
+
 def test_final_message_failed_exec_is_none(monkeypatch):
     monkeypatch.setattr(adapter, "sandbox_exec_direct_bytes", lambda *a, **k: done_bytes(b"", rc=1))
     assert oe.final_message("sb", "claude") is None

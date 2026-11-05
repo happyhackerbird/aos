@@ -341,12 +341,6 @@ def resolve_tip(worktree: str, branch: str, git_dir: str | None = None) -> str:
     return git_output(worktree, "rev-parse", "--verify", f"refs/heads/{branch}", git_dir=git_dir)[1].decode(errors="replace").strip()
 
 
-def branch_changes_policy(worktree: str, default_sha: str, tip: str, git_dir: str | None = None) -> bool:
-    _, branch = git_output(worktree, "diff", "--name-only", f"{default_sha}...{tip}", "--", POLICY_PATH, git_dir=git_dir)
-    _, head = git_output(worktree, "diff", "--name-only", f"{default_sha}...HEAD", "--", POLICY_PATH, git_dir=git_dir)
-    return bool(branch.strip() or head.strip())
-
-
 def bus_host(url: str) -> str:
     parsed = urlsplit(url if "://" in url else "//" + url)
     try:

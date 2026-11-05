@@ -1500,3 +1500,53 @@ def test_pr_refuses_missing_run_snapshot(tmp_path: Path, fake: FakeHTTP) -> None
     assert code_lane.attempts(run["id"]) == 0
     code_lane.poll()
     assert next(row for row in store.lanes() if row["lane"] == "code.poll")["last_outcome"] == "ok"
+
+
+# -- required checks (verification gates U2) -----------------------------------
+
+def _setup_gated_merge(client: TestClient, store: Store, github_fake: FakeGitHub,
+                       required: list[str]) -> tuple[dict, dict]:
+    """_setup_merge_ready for a task added with required checks: PR open at the result commit, a passing
+    integration check recorded for it."""
+    github_fake.pr_head_sha = "c" * 40
+    assert client.put("/repos/repo-a", json={"default_host": "any", "deliver": "pr"}).status_code == 200
+    task = client.post("/tasks", json={"repo": "repo-a", "title": "Gated", "brief": "do it", "acceptance": ["true"],
+                                       "required_checks": required}).json()
+    assert client.post(f"/tasks/{task['id']}/ready").status_code == 200
+    run = client.post(f"/tasks/{task['id']}/claim", json={
+        "worker": "w1", "worker_host": "mac", "expected_spec_hash": task["spec_hash"],
+        "effective_acceptance": ["true"], "acceptance_source": "task"}).json()
+    assert client.post(f"/runs/{run['id']}/start", json={"claim_token": run["claim_token"], "base_commit": "b1",
+                                                        "branch": f"ao/{task['id']}", "worktree": "/x"}).status_code == 200
+    _post_result(client, run, result_commit="c" * 40)
+    run = store.get_run(run["id"])
+    assert run["pr_head_sha"] == "c" * 40
+    _record_passing_check(store, github_fake, task, run)
+    return task, store.get_run(run["id"])
+
+
+def test_merge_is_refused_before_github_while_a_required_check_is_missing(tmp_path: Path, fake: FakeHTTP) -> None:
+    github_fake = FakeGitHub()
+    client, store, settings, code_lane = build_code_bus(tmp_path, fake, github_fake)
+    task, run = _setup_gated_merge(client, store, github_fake, ["merge-check", "review"])
+    assert [(c["name"], c["state"]) for c in run["checks"]] == [("merge-check", "passed"), ("review", "missing")]
+    calls_before = len(github_fake.calls)
+    response = client.post(f"/tasks/{task['id']}/merge", json={"pr_head_sha": "c" * 8})
+    assert response.status_code == 409 and response.json()["detail"] == "required checks missing: review"
+    assert github_fake.calls[calls_before:] == []  # no PR read, no branch read, no PUT
+    assert _last_card(fake)["text"].startswith("required checks missing: review")
+    store.record_check(task["id"], "review", commit="c" * 40, note="reviews/AO-1.md")
+    merged = client.post(f"/tasks/{task['id']}/merge", json={"pr_head_sha": "c" * 8})
+    assert merged.status_code == 200 and merged.json()["status"] == "done", merged.text
+    assert len([c for c in github_fake.calls if c[0] == "PUT"]) == 1
+
+
+def test_a_merge_github_already_reported_closes_without_the_checks(tmp_path: Path, fake: FakeHTTP) -> None:
+    github_fake = FakeGitHub()
+    client, store, settings, code_lane = build_code_bus(tmp_path, fake, github_fake)
+    task, run = _setup_gated_merge(client, store, github_fake, ["review"])
+    store.meta_set(f"code.merged_unclosed.{run['id']}", "m" * 40)  # GitHub merged; the task is not closed yet
+    response = client.post(f"/tasks/{task['id']}/merge", json={"pr_head_sha": "c" * 8})
+    assert response.status_code == 200 and response.json()["status"] == "done", response.text
+    assert store.get_run(run["id"])["merge_commit"] == "m" * 40
+    assert not [c for c in github_fake.calls if c[0] == "PUT"]

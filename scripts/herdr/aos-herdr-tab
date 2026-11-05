@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Open a Herdr tab attached to an interactive AOS run.
+#
+# Set as the runner's interactive-ready hook (AOS_INTERACTIVE_READY_HOOK): the runner
+# shlex-splits argv without a shell, sets PATH=os.defpath, AOS_TASK_ID and AOS_RUN_ID,
+# and kills its process group after 30 s or at run end. Manual use: aos-herdr-tab AO-31-r1.
+#
+# The script only creates the tab and types one command line into its pane, then exits.
+# `aos attach`, the final status line and the delayed tab close all run in the pane's
+# shell, so they use the Herdr session's environment (AOS_URL, AOS_TOKEN) and outlive
+# the hook.
+#
+# HERDR_BIN          Herdr binary (default: herdr on PATH)
+# AOS_HERDR_SESSION  Herdr session (default: default)
+# AOS_HERDR_CLOSE_DELAY  seconds after printing the status before closing (default: 60)
+set -euo pipefail
+
+usage() {
+    echo "usage: aos-herdr-tab [RUN_ID]   (default: \$AOS_RUN_ID)" >&2
+    exit 2
+}
+
+[[ $# -le 1 ]] || usage
+case "${1:-}" in -h|--help) usage ;; esac
+
+run_id="${1:-${AOS_RUN_ID:-}}"
+if [[ ! "$run_id" =~ ^AO-[0-9]+-r[0-9]+$ ]]; then
+    echo "aos-herdr-tab: need a run id AO-<n>-r<k>, got '${run_id}'" >&2
+    exit 2
+fi
+if [[ $# -eq 0 && "${AOS_TASK_ID:-}" =~ ^AO-[0-9]+$ ]]; then
+    task_id="$AOS_TASK_ID"
+else
+    task_id="${run_id%-r*}"
+fi
+
+session="${AOS_HERDR_SESSION:-default}"
+delay="${AOS_HERDR_CLOSE_DELAY:-60}"
+[[ "$delay" =~ ^[0-9]+$ ]] || { echo "aos-herdr-tab: AOS_HERDR_CLOSE_DELAY must be whole seconds" >&2; exit 2; }
+delay=$((10#$delay))
+herdr="${HERDR_BIN:-herdr}"
+if ! herdr_path="$(command -v -- "$herdr")"; then
+    echo "aos-herdr-tab: herdr binary '$herdr' not found (PATH=$PATH); set HERDR_BIN" >&2
+    exit 1
+fi
+
+# With timeout available, bound each Herdr call to 10 s. A wedged Herdr can still
+# take nearly the hook's 30 s limit (29.1 s observed, including cleanup).
+herdr_call() {
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 10 "$herdr_path" --session "$session" "$@"
+    else
+        "$herdr_path" --session "$session" "$@"
+    fi
+}
+
+json_field() {  # json_field <key> <json>: the last string value of <key> on the first matching line
+    sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" <<<"$2" | head -n 1
+}
+
+created="$(herdr_call tab create --label "$task_id" | tr -d '\n')"
+tab_id="$(json_field tab_id "$created")"
+pane_id="$(json_field pane_id "$(sed -n 's/.*"root_pane"//p' <<<"$created")")"
+if [[ -z "$tab_id" || -z "$pane_id" ]]; then
+    echo "aos-herdr-tab: unexpected herdr tab create output: $created" >&2
+    [[ -z "$tab_id" ]] || herdr_call tab close "$tab_id" >/dev/null 2>&1 || true
+    exit 1
+fi
+
+# Keep the pane command portable to bash, zsh and dash (in particular, zsh's
+# `status` variable is read-only). Task/run ids have already been validated.
+printf -v close_command 'sleep %d; %q --session %q tab close %q' \
+    "$delay" "$herdr_path" "$session" "$tab_id"
+printf -v pane_command '%s' \
+    "aos attach $run_id; " \
+    'aos_status=unknown; aos_deadline=$(( $(date +%s) + 900 )); ' \
+    'while :; do ' \
+    'if aos_rows=$(aos list); then ' \
+    "aos_observed=\$(printf '%s\\n' \"\$aos_rows\" | awk -F '\\t' '\$1 == \"$task_id\" { print \$2 }'); " \
+    'if [ -n "$aos_observed" ]; then ' \
+    'aos_status=$aos_observed; [ "$aos_status" != running ] && break; ' \
+    'fi; fi; ' \
+    'aos_remaining=$((aos_deadline - $(date +%s))); ' \
+    '[ "$aos_remaining" -le 0 ] && break; ' \
+    'if [ "$aos_remaining" -gt 5 ]; then sleep 5; else sleep "$aos_remaining"; fi; ' \
+    'done; printf "status: %s\n" "$aos_status"; ' \
+    "$close_command"
+if ! herdr_call pane run "$pane_id" "$pane_command" >/dev/null; then
+    echo "aos-herdr-tab: herdr pane run $pane_id failed; closing tab $tab_id" >&2
+    herdr_call tab close "$tab_id" >/dev/null 2>&1 || true
+    exit 1
+fi
+
+echo "aos-herdr-tab: $run_id attached in Herdr session $session tab $tab_id (pane $pane_id)"

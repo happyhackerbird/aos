@@ -11,7 +11,9 @@ and its prompt carries the previous run's report. The job tarball is released in
 only after the effective policy matched the rendering. Pi-family runs (flavours ``pi`` and ``omp``,
 see ``agent_os.pi`` and docs/pi-adapter.md) add a capability check of the harness binary, a
 nonrenewable worker-auth snapshot, the settled event contract, a bundle secret scan and always-fresh
-acceptance. Every sandbox gets an ownership marker in its state directory before it is created, so
+acceptance. Devin runs are headless: the worker's credentials.toml goes up per run, and with messaging on the aos server
+and hooks go into the Devin user directory under XDG_CONFIG_HOME, unless the repository's .devin settings could replace or
+wrap that server. Every sandbox gets an ownership marker in its state directory before it is created, so
 ``reconcile`` can delete sandboxes of runs that ended on the bus while the runner was gone.
 
     python -m agent_os.openshell_runner run <task-id>
@@ -22,15 +24,19 @@ Environment (operator configuration, never from the repository):
   AOS_REPO_ROOT, AOS_OPENSHELL_PLATFORM (linux|colima-mac), AOS_OPENSHELL_IMAGE,
   AOS_OPENSHELL_PROVIDER_<HARNESS>, AOS_OPENSHELL_PROVIDER_HOSTS (comma list),
   AOS_OPENSHELL_HARNESS_HOSTS_<HARNESS> (comma list of host:port), AOS_OPENSHELL_CODEX_AUTH,
+  AOS_OPENSHELL_DEVIN_AUTH (the worker's credentials.toml), AOS_OPENSHELL_DEVIN_MODEL,
   AOS_OPENSHELL_PI_FLAVOUR (pi|omp), AOS_OPENSHELL_PI_BIN, AOS_OPENSHELL_PI_PROVIDER, AOS_OPENSHELL_PI_MODEL,
-  AOS_OPENSHELL_PI_AUTH, AOS_OPENSHELL_PI_ACCOUNT_ID, AOS_OPENSHELL_CPU, AOS_OPENSHELL_MEMORY, AOS_OPENSHELL_STATE_DIR,
+  AOS_OPENSHELL_PI_AUTH or AOS_OPENSHELL_PI_LOGIN (with AOS_OPENSHELL_PI_LOGIN_BIN), AOS_OPENSHELL_PI_ACCOUNT_ID,
+  AOS_OPENSHELL_CPU, AOS_OPENSHELL_MEMORY, AOS_OPENSHELL_STATE_DIR,
   AOS_OPENSHELL_SANDBOX_PREFIX (2 or 3 lower-case letters or digits starting with a letter, never aos; default `a` + two
   hex digits of sha256 of AOS_URL's host:port: the start of every sandbox, state directory and per-run database name),
   AOS_OPENSHELL_FRESH_ACCEPTANCE (default 1: acceptance in a new credential-free sandbox from the result tree;
-  0 runs it in the job sandbox; Pi-family runs are always fresh),
+  0 runs it in the job sandbox; Pi-family and Devin runs are always fresh),
   AOS_OPENSHELL_BASELINE (default 0; 1 runs the same commands before the agent in a `-pre` sandbox and the report
   compares the exit codes; needs fresh acceptance),
-  AOS_OPENSHELL_COMMS (0|1, default 1: a Claude run gets the aos messaging tools and hooks; a Linux worker sets 0 until bus reach from a workload is measured),
+  AOS_OPENSHELL_COMMS (0|1|pull, default 1: Claude, Codex, Pi and Devin runs get the aos messaging tools and automatic
+  delivery, `pull` the tools alone; a repository's .codex or .devin settings turn them off for that run; a Linux worker
+  sets 0 until bus reach from a workload is measured),
   AOS_OPENSHELL_CLAUDE_PLUGINS (comma list of host Claude Code plugin directories: uploaded per Claude run to
   /sandbox/plugins/<name> and loaded with --plugin-dir; the run then allows the Skill tool and enables hooks;
   resolved and refused when a Claude run starts; other harnesses never read it),
@@ -42,6 +48,9 @@ Environment (operator configuration, never from the repository):
   index.js (an extension, loaded with -e), skills/<name>/SKILL.md and agents/*.md: uploaded per Pi run to
   /sandbox/plugins/<name>; pi takes skills by --skill and loads no agents, omp gets skills and agents copied into its
   directories, where its task tool finds the agents; resolved and refused when a Pi run starts),
+  AOS_OPENSHELL_DEVIN_PLUGINS (comma list of host directories, each named by its basename and holding any of
+  skills/<name>/SKILL.md and agents/*.md: uploaded per Devin run to /sandbox/plugins/<name> and copied into the run's
+  Devin user directory; a hooks.json refuses; resolved and refused when a Devin run starts),
   AOS_OPENSHELL_BUS_PORT, AOS_OPENSHELL_BUS_HOST (optional: an IPv4 literal or a bus alias, the host the sandbox
   reaches the bus by, written into the aos-bus rule and the run file; default 192.168.5.2 on colima-mac and
   host.openshell.internal on linux, see agent_os.openshell_policy.bus_host),
@@ -60,6 +69,7 @@ import hashlib
 import json
 import os
 import re
+import selectors
 import shlex
 import shutil
 import signal
@@ -70,7 +80,10 @@ import tarfile
 import tempfile
 import threading
 import time
+import tomllib
+import unicodedata
 import uuid
+from collections.abc import Callable, Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO, Any
@@ -84,8 +97,9 @@ from agent_os import evidence, openshell_evidence, openshell_policy, openshell_s
 from agent_os.resources import ServiceError
 from agent_os.harness import VERIFY_SKILL_LINE, Heartbeat, verify_skill_on_default
 
-HARNESSES = ("claude", "codex", "pi")
+HARNESSES = ("claude", "codex", "pi", "devin")
 REPORT_CAP = 20000
+Secret = str | tuple[str, ...] | None  # one run's secret, or two: a comms-on Devin run has the claim token and the key
 CLAUDE_SETTINGS = {
     "permissions": {"defaultMode": "dontAsk", "allow": ["Bash(*)", "Read(*)", "Edit(*)", "Write(*)", "Agent(*)"],
                     "deny": ["WebFetch", "WebSearch", "mcp__*"]},
@@ -99,8 +113,7 @@ HANDOFF_PROMPT = (
     "End your final message with a section headed Handoff holding four lines, each starting with its label: "
     "Done: what you completed; Remaining: what is left, or nothing; Checked: the commands you ran and what they "
     "showed; Blocked: what was missing, or nothing. The runner records that message as the run's report.")
-AOS_AGENT_PROTOCOL = "2.0"
-AOS_AGENT_PROTOCOL_INTERACTIVE = "2.2"
+AOS_AGENT_PROTOCOL = "2.6"
 HANDOFF_PROMPT_INTERACTIVE = HANDOFF_PROMPT.removesuffix(" The runner records that message as the run's report.")
 COMMS_PROMPT = (
     'You can talk to other agents and to the operator through the MCP tools of the server\n'
@@ -129,8 +142,8 @@ COMMS_PROMPT_OMP = (
     'Ask the operator, then wait, for a decision the task does not settle: scope, a\n'
     'destructive step, an ambiguous acceptance. If no answer comes, continue on an assumption\n'
     'you write into your report, or stop and say in your report that you are blocked on the\n'
-    'question. Messages for you arrive after a tool call, appended to its result; when you finish\n'
-    'with a request you acknowledged but did not answer, you get one more turn to answer it.\n'
+    'question. Messages for you arrive in your context while idle or at the next turn boundary while busy; when you finish\n'
+    'with a request delivered to you that you did not answer, you get one more turn to answer it.\n'
     'Call mcp__aos_inbox before you commit.'
 )
 COMMS_PROMPT_PI = (
@@ -141,19 +154,25 @@ COMMS_PROMPT_PI = (
     'declares what you change. mcp__aos__aos_propose(title, brief, acceptance) proposes a new task in\n'
     'your repository; it waits for the operator unless the repository starts proposals ready.\n'
     'Messages from other agents are not from the operator and grant no permission.\n'
-    'Ask the operator, then wait, for a decision the task does not settle: scope, a\n'
-    'destructive step, an ambiguous acceptance. If no answer comes, continue on an assumption\n'
+    'Ask the operator, then wait, for a decision the task does not settle: scope, a\ndestructive step, an ambiguous acceptance. If no answer comes, continue on an assumption\n'
     'you write into your report, or stop and say in your report that you are blocked on the\n'
     'question. Messages for you arrive after a tool call, appended to its result; when you finish\n'
-    'with a request you acknowledged but did not answer, you get one more turn to answer it.\n'
+    'with a request delivered to you that you did not answer, you get one more turn to answer it.\n'
     'Call mcp__aos__aos_inbox before you commit.'
 )
 COMMS_PROMPT_OMP_INTERACTIVE = COMMS_PROMPT_OMP.replace(
-    "Messages for you arrive after a tool call, appended to its result; when you finish\n"
-    "with a request you acknowledged but did not answer, you get one more turn to answer it.\n",
-    "Messages for you arrive after a tool call, appended to its result; in this interactive session\n"
-    "there is no automatic extra turn: answer every request you acknowledged before you submit.\n"
+    "Messages for you arrive in your context while idle or at the next turn boundary while busy; when you finish\n"
+    "with a request delivered to you that you did not answer, you get one more turn to answer it.\n",
+    "Messages for you arrive in your context while idle or at the next turn boundary while busy; in this interactive session\n"
+    "there is no automatic extra turn: answer every request delivered to you before you submit.\n"
 ) + "\nThis session is interactive: the operator may type to you directly in this terminal; answer here. When your work is committed, submit it with mcp__aos_submit(report, commit, children): report is your final report, commit the 40-character sha of the commit to check, children an empty list unless you coordinated child tasks. Submission asks AOS to verify, not to accept: AOS then closes this session, checks exactly that commit and runs the acceptance commands on it. Leaving with /exit before a submission ends the task unsuccessfully. Put the Handoff section inside the report you pass to mcp__aos_submit; that report is what the runner records."
+
+COMMS_PROMPT_CLAUDE_INTERACTIVE = (
+    "This is an interactive Claude Code session; the operator may type directly in this terminal. "
+    "Use the `aos` MCP server tools, exposed as mcp__aos__aos_<verb>. Call "
+    "mcp__aos__aos_submit(report, commit, children) after committing the exact candidate; "
+    "submission closes input and starts managed acceptance. `/exit` without submission fails the run. "
+    "Put the Handoff section in the report passed to aos_submit.")
 COMMS_PROMPT_OMP_COORDINATOR = (
     'You may split the work into child tasks. First call mcp__aos_family and read its capacity line; propose at '
     'most that many children at once with mcp__aos_propose, giving each a stable request_id (child-1, child-2, '
@@ -194,14 +213,15 @@ COMMS_PROMPT_CODEX = (
     'destructive step, an ambiguous acceptance. If no answer comes, continue on an assumption\n'
     'you write into your report, or stop and say in your report that you are blocked on the\n'
     'question. Messages for you arrive after a tool call, as developer context; when you finish\n'
-    'with a request you acknowledged but did not answer, you get one more turn to answer it.\n'
+    'with a request delivered to you that you did not answer, you get one more turn to answer it.\n'
     'Call aos_inbox before you commit.'
 )
-COMMS_PROMPTS = {"omp": COMMS_PROMPT_OMP, "pi": COMMS_PROMPT_PI, "codex": COMMS_PROMPT_CODEX}
+# Devin takes pi's paragraph: the same tool names, and delivery after a tool call through the aos hooks.
+COMMS_PROMPTS ={"omp": COMMS_PROMPT_OMP, "pi": COMMS_PROMPT_PI, "codex": COMMS_PROMPT_CODEX, "devin": COMMS_PROMPT_PI}
 # AOS_OPENSHELL_COMMS=pull (SU4 negative control): the paragraph stays verbatim and this one sentence follows it, the
 # inbox tool named as the harness exposes it; nothing arrives unless the model calls it.
 COMMS_PULL_PROMPT = "This run delivers nothing automatically: call {inbox} yourself."
-COMMS_INBOX = {"omp": "mcp__aos_inbox", "pi": "mcp__aos__aos_inbox"}
+COMMS_INBOX = {"omp": "mcp__aos_inbox", "pi": "mcp__aos__aos_inbox", "devin": "mcp__aos__aos_inbox"}
 COMMS_PULL_NOTE = "messaging: pull only (no automatic delivery, no finalization hold)"
 # The aos server on Codex's command line, which outranks every config file for these keys (finding 2), and its calls
 # allowed 1000 s (one aos_wait call lasts up to 900 s).
@@ -212,6 +232,9 @@ CODEX_MCP_ARGS = ('mcp_servers.aos.command="/usr/local/bin/aos-agent"', 'mcp_ser
 # (F101, F131) where a home-layer config.toml table would not (F27).
 CODEX_HOOK_ARGS = ('hooks.PostToolUse=[{hooks=[{type="command",command="/usr/local/bin/aos-agent inbox --hook",timeout=10}]}]',
                    'hooks.Stop=[{hooks=[{type="command",command="/usr/local/bin/aos-agent stop --hook",timeout=10}]}]')
+CODEX_RECEIVER_ARGS = (
+    'hooks.SessionStart=[{hooks=[{type="command",command="/usr/local/bin/aos-agent receiver-start --hook",timeout=3}]}]',
+    'hooks.SessionEnd=[{hooks=[{type="command",command="/usr/local/bin/aos-agent receiver-end --hook",timeout=3}]}]')
 # Codex reads the repository's .codex/config.toml whatever the project's trust (finding 3), starts its servers and
 # merges its keys into ours, env included (finding 4: a PYTHONPATH there runs the repository's code inside the aos
 # server). No flag skips it, so a Codex run of such a repository gets no aos tools.
@@ -222,11 +245,22 @@ CODEX_CONFIG_NOTE = ("messaging: off for this Codex run: the repository has .cod
 CODEX_HOOKS_NOTE = "messaging: off for this Codex run: the repository has .codex/hooks.json, which Codex runs under the hook trust bypass"
 CODEX_ALIAS_NOTE = "messaging: off for this Codex run: the repository has a .codex symlink, which may alias Codex configuration"
 CODEX_NONTREE_NOTE = "messaging: off for this Codex run: the repository has a .codex entry that is not a directory, which may alias Codex configuration"
+# A repository's .devin/mcp_config.json or .devin/mcp_config.local.json replaces a user server of the same name, and its
+# .devin config and hooks files can add hooks beside ours, so a Devin run of such a repository gets no aos tools. Other
+# .devin content, its rules for one, leaves the server alone.
+DEVIN_PROJECT_FILES = (".devin/mcp_config.json", ".devin/mcp_config.local.json", ".devin/config.json",
+                       ".devin/config.local.json", ".devin/hooks.v1.json")
+DEVIN_SUBAGENT_SOURCES = (".devin/skills", ".devin/agents", ".agents/skills", ".agents/agents", ".windsurf/skills")
+DEVIN_FILE_NOTE = ("messaging: off for this Devin run: the repository has {path}, which can replace the aos server or add "
+                   "hooks beside it")
+DEVIN_ALIAS_NOTE = "messaging: off for this Devin run: the repository has a .devin symlink, which may alias Devin configuration"
+DEVIN_NONTREE_NOTE = "messaging: off for this Devin run: the repository has a .devin entry that is not a directory, which may alias Devin configuration"
 
 
 def comms_wired(harness: str, flavour: str) -> bool:
-    """The runs AOS_OPENSHELL_COMMS gives the aos tools: Claude (U3), Codex (U6) and both Pi flavours (omp U6, pi SU2)."""
-    return harness in ("claude", "codex", "pi")
+    """The runs AOS_OPENSHELL_COMMS gives the aos tools: Claude (U3), Codex (U6), both Pi flavours (omp U6, pi SU2)
+    and Devin."""
+    return harness in ("claude", "codex", "pi", "devin")
 
 
 def codex_config_notes(source: str, default: policy.Default) -> tuple[str, ...]:
@@ -262,10 +296,39 @@ def has_codex_config(source: str, default: policy.Default) -> bool:
     return bool(codex_config_notes(source, default))
 
 
+def devin_config_notes(source: str, start_sha: str) -> tuple[str, ...]:
+    """The refusal notes for a Devin run starting from `start_sha`, as codex_config_notes finds them: one per file of
+    DEVIN_PROJECT_FILES (any mode, a symlink leaf included), then a `.devin` entry that is not a tree. Empty: messaging
+    may be wired. The commit the job starts from, not the default branch: that is the tree Devin reads, so on a
+    continuing run a file an earlier attempt committed counts. The leaf query cannot see through a .devin symlink,
+    hence the parent query."""
+    _, leaves = policy.git_output(source, "ls-tree", "--full-tree", start_sha, "--",
+                                  *DEVIN_PROJECT_FILES, *DEVIN_SUBAGENT_SOURCES)
+    paths = {line.split("\t", 1)[1] for line in leaves.decode(errors="replace").splitlines() if "\t" in line}
+    notes = [DEVIN_FILE_NOTE.format(path=path) for path in DEVIN_PROJECT_FILES if path in paths]
+    notes.extend(
+        f"messaging: off for this Devin run: the repository has {path}, "
+        "whose skills or agent profiles can start a child that shares the run's session id"
+        for path in DEVIN_SUBAGENT_SOURCES if path in paths)
+    _, parent = policy.git_output(source, "ls-tree", "--full-tree", start_sha, "--", ".devin", ".agents", ".windsurf")
+    for line in parent.decode(errors="replace").splitlines():
+        meta, _, path = line.partition("\t")
+        if path not in (".devin", ".agents", ".windsurf"):
+            continue
+        mode = meta.split()[0]
+        if mode == "120000":
+            notes.append(DEVIN_ALIAS_NOTE if path == ".devin" else
+                         f"messaging: off for this Devin run: the repository has a {path} symlink, "
+                         "which may alias Devin skills or agent profiles")
+        elif mode != "040000":
+            notes.append(DEVIN_NONTREE_NOTE if path == ".devin" else
+                         f"messaging: off for this Devin run: the repository has a {path} entry that is not a directory, "
+                         "which may alias Devin skills or agent profiles")
+    return tuple(notes)
+
+
 def claude_settings(comms: bool, plugins: bool = False, automatic: bool = True) -> dict[str, Any]:
-    """The --settings file: unchanged with comms and plugins off; with plugins on, the Skill tool allowed and hooks
-    enabled (the plugins' own hooks fire; no settings hooks key); with comms on, the aos MCP server allowed and the
-    two aos-agent hooks (agent-comms U3), the hooks left out when `automatic` is off (AOS_OPENSHELL_COMMS=pull)."""
+    """Native lifecycle hooks in both comms modes; automatic mode also delivers and finalizes."""
     if not comms and not plugins:
         return CLAUDE_SETTINGS
     settings = copy.deepcopy(CLAUDE_SETTINGS)
@@ -276,13 +339,16 @@ def claude_settings(comms: bool, plugins: bool = False, automatic: bool = True) 
         return settings
     settings["permissions"]["allow"].append("mcp__aos__*")
     settings["permissions"]["deny"] = ["WebFetch", "WebSearch"]
-    if not automatic:
-        return settings
     settings["disableAllHooks"] = False
     settings["hooks"] = {
-        "PostToolUse": [{"hooks": [{"type": "command", "command": "/usr/local/bin/aos-agent inbox --hook", "timeout": 10}]}],
-        "Stop": [{"hooks": [{"type": "command", "command": "/usr/local/bin/aos-agent stop --hook", "timeout": 10}]}],
+        "SessionStart": [{"hooks": [{"type": "command", "command": "/usr/local/bin/aos-agent receiver-start --hook", "timeout": 3}]}],
+        "SessionEnd": [{"hooks": [{"type": "command", "command": "/usr/local/bin/aos-agent receiver-end --hook", "timeout": 3}]}],
     }
+    if automatic:
+        settings["hooks"].update({
+            "PostToolUse": [{"hooks": [{"type": "command", "command": "/usr/local/bin/aos-agent inbox --hook", "timeout": 10}]}],
+            "Stop": [{"hooks": [{"type": "command", "command": "/usr/local/bin/aos-agent stop --hook", "timeout": 10}]}],
+        })
     return settings
 
 
@@ -304,7 +370,9 @@ ENTRY_ATTEMPTS = 3           # services of one requested candidate or import who
 RETIRE_PATHS = ("/sandbox/aos-run.json", "/sandbox/services.env", "/tmp/pi-agent/agent.db",
                 "/tmp/pi-agent/agent.db-wal", "/tmp/pi-agent/agent.db-shm", "/tmp/pi-agent/agent.db-journal")
 NO_SUBMISSION = "the interactive session ended without a submission; submit with aos_submit before /exit"
-INTERACTIVE_PREREQUISITES = "interactive execution needs the omp flavour of the pi harness with messaging on (AOS_OPENSHELL_PI_FLAVOUR=omp, AOS_OPENSHELL_COMMS=1)"
+INTERACTIVE_PREREQUISITES = ("interactive execution needs either the omp flavour of the pi harness with messaging on "
+                             "(AOS_OPENSHELL_PI_FLAVOUR=omp, AOS_OPENSHELL_COMMS=1) or the Claude harness with "
+                             "messaging on (AOS_OPENSHELL_COMMS=1)")
 CENSUS_OK = "CENSUS-OK"
 PROMPT_ARGV_MAX = 65536
 PROMPT_TOO_LONG = "the initial prompt is {n} bytes; an interactive run's prompt travels as one argument and is capped at 65536 bytes"
@@ -489,18 +557,94 @@ class Settings:
     push: str = "off"                     # off|on: deliver ao/<task> to the source's remote (task-flow Part C)
     push_remote: str = "origin"
     push_token_file: str | None = None
-    comms: bool = True                     # AOS_OPENSHELL_COMMS: the aos messaging tools for Claude (with hooks), Codex and omp runs
+    comms: bool = True                     # AOS_OPENSHELL_COMMS: the aos messaging tools for Claude (with hooks), Codex, Pi and Devin runs
     comms_pull: bool = False               # AOS_OPENSHELL_COMMS=pull: the tools and credential without automatic delivery
     baseline: bool = False                 # AOS_OPENSHELL_BASELINE: the acceptance commands run once before the agent
     bus_host: str | None = None            # AOS_OPENSHELL_BUS_HOST: overrides the platform's bus host (endpoint lane)
     claude_plugins: tuple[str, ...] = ()   # AOS_OPENSHELL_CLAUDE_PLUGINS as given; plugin_roots() resolves it for a Claude run
     codex_plugins: tuple[str, ...] = ()    # AOS_OPENSHELL_CODEX_PLUGINS as given; plugin_dirs() resolves it for a Codex run
     pi_plugins: tuple[str, ...] = ()       # AOS_OPENSHELL_PI_PLUGINS as given; plugin_dirs() resolves it for a Pi run
+    devin_plugins: tuple[str, ...] = ()    # AOS_OPENSHELL_DEVIN_PLUGINS as given; plugin_dirs() resolves it for a Devin run
+    pi_login: str | None = None            # AOS_OPENSHELL_PI_LOGIN: a persistent omp worker login renewed on the host
+    pi_login_bin: str = "omp"              # AOS_OPENSHELL_PI_LOGIN_BIN: the host omp that renews it
     git_identity: tuple[str, str] | None = None  # AOS_GIT_NAME and AOS_GIT_EMAIL: what an agent commits as
+    interactive_ready_hook: tuple[str, ...] = ()  # host argv; no inherited environment
+    harness_output_cap_mib: int = 512      # maximum raw session evidence read back, plus one byte to detect overflow
+    devin_auth: str | None = None          # AOS_OPENSHELL_DEVIN_AUTH: the worker's credentials.toml, uploaded per run
+    devin_model: str | None = None         # AOS_OPENSHELL_DEVIN_MODEL: --model for a Devin run
 
 
-# A model id or alias for `claude --model`: never an option, never shell syntax.
+# A model id or alias for `claude --model` or `devin --model`: never an option, never shell syntax.
 CLAUDE_MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/\[\]-]*")
+
+# Devin, as measured on 3000.11.92 in docs/probes/2026-11-02-devin-mechanisms.md. The credential sits under
+# XDG_DATA_HOME, outside the repository. `--config` supplies no MCP servers, so the user's files sit under
+# XDG_CONFIG_HOME instead: config.json, mcp_config.json, skills/ and agents/.
+DEVIN_DATA = "/sandbox/devin-data"
+DEVIN_CREDENTIALS = f"{DEVIN_DATA}/devin/credentials.toml"
+DEVIN_CONFIG_HOME = "/sandbox/devin-config"
+DEVIN_USER_DIR = f"{DEVIN_CONFIG_HOME}/devin"
+# The repository's standard rule files stay readable, as AGENTS.md does for omp (`agents_standard` also covers
+# AGENTS.local.md, AGENT.md and .windsurfrules). This covers imports from other tools only: a repository's own
+# `.devin/` settings still apply, which is what devin_config_notes guards against.
+DEVIN_CONFIG = {"read_config_from": {"agents_standard": True, "cursor": False, "windsurf": False, "claude": False,
+                                     "copilot": False, "opencode": False, "zed": False, "cloud": False}}
+# The aos hooks, added to the user's config.json with automatic delivery: PostToolUse pulls the inbox, Stop holds the
+# final turn once (the commands of CODEX_HOOK_ARGS and claude_settings).
+DEVIN_HOOKS = {
+    "PostToolUse": [{"hooks": [{"type": "command", "command": "/usr/local/bin/aos-agent inbox --hook", "timeout": 10}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "/usr/local/bin/aos-agent stop --hook", "timeout": 10}]}],
+}
+DEVIN_MCP_CONFIG = {"mcpServers": {"aos": {"command": "/usr/local/bin/aos-agent", "args": ["mcp"], "transport": "stdio"}}}
+# With this denied `devin -p` hangs rather than exits. Its API, update, feature-flag and Sentry hosts can stay denied.
+DEVIN_REQUIRED_GRANTS = ("server.codeium.com:443",)
+DEVIN_KEY_FIELD = "windsurf_api_key"  # the secret in credentials.toml; the file's other fields are public URLs
+DEVIN_NO_MESSAGE = ("devin exited 0 with no final message: `devin -p` also exits 0 when it stops on a rejected tool "
+                    "call, so this exit status does not show that the agent finished")
+
+
+def devin_config(comms: bool, automatic: bool) -> dict[str, Any]:
+    """The user's config.json: isolate the messaging owner and install its lifecycle and optional delivery hooks."""
+    config = copy.deepcopy(DEVIN_CONFIG)
+    if comms:
+        config["subagents_enabled"] = False
+        config["hooks"] = {
+            "SessionStart": [{"hooks": [{"type": "command", "command": "/usr/local/bin/aos-agent receiver-start --hook", "timeout": 3}]}],
+            "SessionEnd": [{"hooks": [{"type": "command", "command": "/usr/local/bin/aos-agent receiver-end --hook", "timeout": 3}]}],
+        }
+        if automatic:
+            config["hooks"].update(copy.deepcopy(DEVIN_HOOKS))
+    return config
+
+
+def devin_admission(settings: "Settings") -> str:
+    """What a Devin run needs, refused before any claim. Returns the worker's key, a secret of the run beside the claim
+    token of a comms-on run: scrubbed from what the run posts and refused in its commits as that token is."""
+    if not settings.devin_auth:
+        raise AdapterError("AOS_OPENSHELL_DEVIN_AUTH is required for a Devin run (the worker's credentials.toml)")
+    if not os.path.isfile(settings.devin_auth):
+        raise AdapterError(f"AOS_OPENSHELL_DEVIN_AUTH is not a file: {settings.devin_auth}")
+    try:
+        with open(settings.devin_auth, "rb") as handle:
+            key = tomllib.load(handle).get(DEVIN_KEY_FIELD)
+    except (OSError, ValueError) as exc:  # the decoder's message can quote the file, so only its type is named
+        raise AdapterError(f"AOS_OPENSHELL_DEVIN_AUTH could not be read: {type(exc).__name__}") from None
+    if not isinstance(key, str) or not key:
+        raise AdapterError(f"AOS_OPENSHELL_DEVIN_AUTH has no {DEVIN_KEY_FIELD}")
+    if "devin" in settings.providers:
+        raise AdapterError("AOS_OPENSHELL_PROVIDER_DEVIN is set; Devin runs use the worker's credentials file, "
+                           "not an OpenShell provider")
+    granted = {entry.lower() for entry in settings.harness_hosts.get("devin", ())}
+    missing = [grant for grant in DEVIN_REQUIRED_GRANTS if grant not in granted]
+    if missing:
+        raise AdapterError("AOS_OPENSHELL_HARNESS_HOSTS_DEVIN must grant " + ", ".join(missing))
+    return key
+
+
+def devin_stderr(text: str) -> str:
+    """Stderr without the sign-in banner a new data directory prints: every sandbox gets one, it names the account,
+    and it comes first, where it would pass for the failure reason."""
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("\N{CHECK MARK}")).strip()
 
 
 def _split(value: str | None) -> tuple[str, ...]:
@@ -557,19 +701,19 @@ def plugin_roots(entries: tuple[str, ...]) -> tuple[str, ...]:
 
 # Each harness's plugin setting; a harness without one runs without plugins.
 PLUGIN_KEYS = {"claude": "AOS_OPENSHELL_CLAUDE_PLUGINS", "codex": "AOS_OPENSHELL_CODEX_PLUGINS",
-               "pi": "AOS_OPENSHELL_PI_PLUGINS"}
-AGENT_SUFFIX = {"codex": ".toml", "pi": ".md"}
+               "pi": "AOS_OPENSHELL_PI_PLUGINS", "devin": "AOS_OPENSHELL_DEVIN_PLUGINS"}
+AGENT_SUFFIX = {"codex": ".toml", "pi": ".md", "devin": ".md"}
 
 
 @dataclasses.dataclass(frozen=True)
 class PluginDir:
-    """An operator-assembled plugin directory for a Codex or Pi run (docs/probes/2026-10-14-codex-mechanisms.md,
+    """An operator-assembled plugin directory for a Codex, Pi or Devin run (docs/probes/2026-10-14-codex-mechanisms.md,
     2026-10-14-pi-mechanisms.md): named by its basename, since it carries no manifest aos reads, and its parts found
     by layout."""
     root: str                     # the real path on the host
     name: str                     # /sandbox/plugins/<name>
     skills: tuple[str, ...] = ()  # directories under skills/ that hold a SKILL.md, sorted
-    agents: tuple[str, ...] = ()  # role files under agents/ (Codex *.toml, Pi *.md), sorted
+    agents: tuple[str, ...] = ()  # role files under agents/ (Codex *.toml, Pi and Devin *.md), sorted
     hooks: bool = False           # Codex: hooks.json at the root
     extension: str | None = None  # Pi: index.ts, else index.js, at the root (loaded with -e)
 
@@ -621,10 +765,11 @@ def _skill_name(path: str) -> str | None:
 
 
 def plugin_dirs(key: str, entries: tuple[str, ...], harness: str) -> tuple[PluginDir, ...]:
-    """A Codex or Pi run's plugin setting resolved: called when that run starts, never from settings_from, so a stale
-    entry stops only the runs that would load it. Refused before any sandbox exists: a missing or unreadable
+    """A Codex, Pi or Devin run's plugin setting resolved: called when that run starts, never from settings_from, so a
+    stale entry stops only the runs that would load it. Refused before any sandbox exists: a missing or unreadable
     directory, a name that is not plain or repeats, a symlink leaving the directory, a skill or agent name two
-    directories share, a second hooks.json (Codex reads one hooks file), a hooks.json that is not a JSON object, a Pi
+    directories share, a second hooks.json (Codex reads one hooks file), a hooks.json that is not a JSON object, a
+    hooks.json in a Devin directory (nothing reads it, and a silently ignored hook is the failure to avoid), a Pi
     skill whose SKILL.md names it otherwise (omp selects by name), a directory with none of the parts."""
     if harness not in AGENT_SUFFIX:
         raise AdapterError(f"no plugin directories for {harness}")
@@ -661,6 +806,8 @@ def plugin_dirs(key: str, entries: tuple[str, ...], harness: str) -> tuple[Plugi
         _plain_entries(key, root, "skill", skills, skill_owners, name)
         _plain_entries(key, root, "agent", agents, agent_owners, name)
         hooks_path = os.path.join(root, "hooks.json")
+        if harness == "devin" and os.path.isfile(hooks_path):
+            raise AdapterError(f"{key}: hooks.json in {root}: a Devin plugin directory carries skills and agents only")
         hooks = harness == "codex" and os.path.isfile(hooks_path)
         if hooks:
             if hooks_owner is not None:
@@ -677,6 +824,7 @@ def plugin_dirs(key: str, entries: tuple[str, ...], harness: str) -> tuple[Plugi
                      if harness == "pi" else None)
         if not (skills or agents or hooks or extension):
             parts = ("skills/<name>/SKILL.md, hooks.json, agents/*.toml" if harness == "codex"
+                     else "skills/<name>/SKILL.md, agents/*.md" if harness == "devin"
                      else "index.ts, index.js, skills/<name>/SKILL.md, agents/*.md")
             raise AdapterError(f"{key}: {root} holds none of {parts}")
         dirs.append(PluginDir(root, name, tuple(skills), tuple(agents), hooks, extension))
@@ -752,9 +900,19 @@ def settings_from(environ: dict[str, str]) -> Settings:
         if not value.isdecimal() or int(value) < 1:
             raise AdapterError(f"{key} must be a positive number of seconds")
         timeouts[key] = int(value)
+    output_cap = environ.get("AOS_HARNESS_OUTPUT_CAP_MIB", "512")
+    try:
+        if not output_cap.isdecimal() or int(output_cap) < 1:
+            raise ValueError
+        output_cap_mib = int(output_cap)
+    except ValueError:
+        raise AdapterError("AOS_HARNESS_OUTPUT_CAP_MIB must be a positive integer") from None
     claude_model = environ.get("AOS_OPENSHELL_CLAUDE_MODEL") or None
     if claude_model is not None and not CLAUDE_MODEL_RE.fullmatch(claude_model):
         raise AdapterError(f"AOS_OPENSHELL_CLAUDE_MODEL is not a model name: {claude_model!r}")
+    devin_model = environ.get("AOS_OPENSHELL_DEVIN_MODEL") or None
+    if devin_model is not None and not CLAUDE_MODEL_RE.fullmatch(devin_model):
+        raise AdapterError(f"AOS_OPENSHELL_DEVIN_MODEL is not a model name: {devin_model!r}")
     fresh = environ.get("AOS_OPENSHELL_FRESH_ACCEPTANCE", "1")
     if fresh not in ("0", "1"):
         raise AdapterError("AOS_OPENSHELL_FRESH_ACCEPTANCE must be 0 or 1 (default 1: acceptance in a new sandbox)")
@@ -784,17 +942,35 @@ def settings_from(environ: dict[str, str]) -> Settings:
     claude_plugins = _split(environ.get("AOS_OPENSHELL_CLAUDE_PLUGINS"))
     codex_plugins = _split(environ.get("AOS_OPENSHELL_CODEX_PLUGINS"))
     pi_plugins = _split(environ.get("AOS_OPENSHELL_PI_PLUGINS"))
+    devin_plugins = _split(environ.get("AOS_OPENSHELL_DEVIN_PLUGINS"))
+    try:
+        pi_login_bin = pi.check_bin(environ.get("AOS_OPENSHELL_PI_LOGIN_BIN") or "omp")
+    except ValueError as exc:
+        raise AdapterError(str(exc).replace("AOS_OPENSHELL_PI_BIN", "AOS_OPENSHELL_PI_LOGIN_BIN")) from None
     git_name, git_email = environ.get("AOS_GIT_NAME") or None, environ.get("AOS_GIT_EMAIL") or None
     if (git_name is None) != (git_email is None):
         raise AdapterError("AOS_GIT_NAME and AOS_GIT_EMAIL go together: set both or neither")
     for key, value in (("AOS_GIT_NAME", git_name), ("AOS_GIT_EMAIL", git_email)):
         if value is not None and (not value.strip() or any(c in "<>" or ord(c) < 32 for c in value)):
             raise AdapterError(f"{key} must be one line without < or > (git writes it into each commit's author line)")
+    hook = environ.get("AOS_INTERACTIVE_READY_HOOK", "")
+    try:
+        hook_argv = shlex.split(hook)
+    except ValueError:
+        raise AdapterError("AOS_INTERACTIVE_READY_HOOK must be a quoted command with balanced quotes") from None
+    if hook:
+        if not hook_argv or any(ord(c) < 32 for c in hook):
+            raise AdapterError("AOS_INTERACTIVE_READY_HOOK must be a nonempty command without control characters")
+        executable = shutil.which(hook_argv[0], path=environ.get("PATH", os.defpath))
+        if executable is None:
+            raise AdapterError("AOS_INTERACTIVE_READY_HOOK executable was not found or is not executable")
+        hook_argv[0] = os.path.abspath(executable)
     return Settings(
         url=url, host=host, repo_root=os.path.expanduser(environ.get("AOS_REPO_ROOT", "~/code")),
         platform=platform, image=image, providers=providers,
         provider_hosts=_split(environ.get("AOS_OPENSHELL_PROVIDER_HOSTS", "api.anthropic.com")),
         harness_hosts=harness_hosts, codex_auth=environ.get("AOS_OPENSHELL_CODEX_AUTH") or None,
+        devin_auth=os.path.expanduser(environ.get("AOS_OPENSHELL_DEVIN_AUTH", "")) or None, devin_model=devin_model,
         claude_model=claude_model,
         pi_model=environ.get("AOS_OPENSHELL_PI_MODEL") or None,
         pi_flavour=flavour, pi_bin=pi_bin,
@@ -806,6 +982,7 @@ def settings_from(environ: dict[str, str]) -> Settings:
         bus_port=int(port),
         harness_timeout=timeouts["AOS_HARNESS_TIMEOUT_SECONDS"],
         accept_timeout=timeouts["AOS_ACCEPT_TIMEOUT_SECONDS"],
+        harness_output_cap_mib=output_cap_mib,
         fresh_acceptance=fresh == "1",
         bus_id=bus_id, sandbox_prefix=sandbox_prefix,
         push=push, push_remote=push_remote,
@@ -817,7 +994,11 @@ def settings_from(environ: dict[str, str]) -> Settings:
         claude_plugins=claude_plugins,
         codex_plugins=codex_plugins,
         pi_plugins=pi_plugins,
+        devin_plugins=devin_plugins,
+        pi_login=os.path.expanduser(environ["AOS_OPENSHELL_PI_LOGIN"]) if environ.get("AOS_OPENSHELL_PI_LOGIN") else None,
+        pi_login_bin=pi_login_bin,
         git_identity=(git_name, git_email) if git_name and git_email else None,
+        interactive_ready_hook=tuple(hook_argv),
     )
 
 
@@ -1065,8 +1246,8 @@ def continuation_tip(source: str, branch: str, default_sha: str) -> str | None:
     return None if anc.returncode == 0 else tip
 
 
-def scan_result(source: str, base: str, result: str, token: str) -> str | None:
-    """S8: refuse a result whose objects carry the claim token. Every object reachable from the result and not from
+def scan_result(source: str, base: str, result: str, token: str, *, name: str = "claim token") -> str | None:
+    """S8: refuse a result whose objects carry the claim token (a Devin run: the worker's key). Every object reachable from the result and not from
     the base (commits, trees, blobs: messages, author, committer, extra headers and file content alike; mailmap and
     diff rendering never apply) is read once by pi.scan_objects through `git cat-file --batch`, so memory is
     bounded by the largest object, not by the history; the listing carries shas only (`--no-object-names`), so no
@@ -1079,13 +1260,90 @@ def scan_result(source: str, base: str, result: str, token: str) -> str | None:
         pi.scan_objects(source, shas, [token.encode()])
     except pi.BundleError as exc:
         if str(exc).startswith("result object"):
-            return LEAK_ERROR
+            return LEAK_ERROR.replace("claim token", name)
         reason = str(exc)
     except (AdapterError, policy.PolicyError, ValueError, OSError, subprocess.SubprocessError) as exc:
         reason = str(exc)
     else:
         return None
-    return f"the result could not be scanned for the claim token ({pi.safe_head(reason, 200, None)}); nothing pushed"
+    return f"the result could not be scanned for the {name} ({pi.safe_head(reason, 200, None)}); nothing pushed"
+
+
+CHANGES_CAP = 40             # paths the change report and a lock refusal name; the rest are counted
+_CHANGE_WORDS = {"A": "added", "D": "deleted", "M": "modified", "T": "type changed"}
+_DIFF_SAFE = ("--no-renames", "--no-textconv", "--no-ext-diff", "-z")  # no driver an agent's attributes could name
+
+
+def _shown_path(raw: bytes) -> str:
+    """An agent-chosen path as a report may show it: UTF-8 with replacement, every control character a `?`."""
+    return "".join("?" if unicodedata.category(c) == "Cc" else c for c in raw.decode("utf-8", "replace"))
+
+
+def _name_status(source: str, base: str, result: str, patterns: tuple[str, ...] | None = None) -> list[tuple[str, str]]:
+    """(status letter, path) of every file that differs between two commits, limited to `patterns` (git globs) when
+    given. A moved file is a deletion and an addition (`--no-renames`)."""
+    spec = ["--", *(f":(glob){pattern}" for pattern in patterns)] if patterns is not None else []
+    _, out = policy.git_output(source, "diff", "--name-status", *_DIFF_SAFE, base, result, *spec)
+    fields = out.split(b"\0")
+    return [(fields[i].decode("ascii", "replace")[:1], _shown_path(fields[i + 1]))
+            for i in range(0, len(fields) - 1, 2) if fields[i]]
+
+
+def _named(pairs: list[tuple[str, str]], budget: int = CHANGES_CAP) -> str:
+    shown = [f"{path} ({_CHANGE_WORDS.get(status, status)})" for status, path in pairs[:budget]]
+    more = len(pairs) - len(shown)
+    return ", ".join(shown) + (f" and {more} more" if more > 0 else "")
+
+
+def protected_refusal(source: str, start_sha: str, result_commit: str, patterns: tuple[str, ...]) -> str | None:
+    """Verification gates U1: refuse a result that adds, changes or deletes a locked path since the run's start (never
+    current main, which moves during a run). The two AOS files are always locked. None when nothing locked changed,
+    else the refusal line naming each path; a check that cannot complete refuses too."""
+    try:
+        changed = _name_status(source, start_sha, result_commit, workflow.locked_patterns(patterns))
+    except (policy.PolicyError, OSError, subprocess.SubprocessError) as exc:
+        return f"the locked paths could not be checked ({pi.safe_head(str(exc), 200, None)}); nothing pushed"
+    if not changed:
+        return None
+    return (f"locked paths changed since {start_sha[:12]}: {_named(changed)}; a locked path changes only on the "
+            "default branch; nothing pushed")
+
+
+def change_report(source: str, base: str, result: str, watch: tuple[str, ...]) -> list[str]:
+    """Verification gates U1: what the result changed since the run's start, for the report's critical tail: the
+    totals, then new and deleted files, then whatever matches the repository's `watch` patterns, at most
+    CHANGES_CAP paths named in all. Best effort: a read that fails is one line saying so."""
+    try:
+        _, numstat = policy.git_output(source, "diff", "--numstat", *_DIFF_SAFE, base, result)
+        pairs = _name_status(source, base, result)
+        watched = _name_status(source, base, result, watch) if watch else []
+    except (policy.PolicyError, OSError, subprocess.SubprocessError) as exc:
+        return [f"changes: not read ({pi.safe_head(str(exc), 200, None)})"]
+    added = deleted = binary = files = 0
+    for entry in numstat.split(b"\0"):
+        parts = entry.split(b"\t", 2)
+        if len(parts) != 3:
+            continue
+        files += 1
+        if parts[0] == b"-" or parts[1] == b"-":
+            binary += 1
+        else:
+            added, deleted = added + int(parts[0]), deleted + int(parts[1])
+    total = (f"changes since {base[:12]}: {files} file{'s' if files != 1 else ''}, +{added} -{deleted}"
+             + (f", {binary} binary" if binary else "")) if files else f"changes since {base[:12]}: no files changed"
+    lines, budget = [total], CHANGES_CAP
+    for label, group in (("new", [p for p in pairs if p[0] == "A"]), ("deleted", [p for p in pairs if p[0] == "D"]),
+                         ("watched", watched)):
+        if not group:
+            continue
+        shown = group[:max(budget, 0)]
+        names = [path if label != "watched" else f"{path} ({_CHANGE_WORDS.get(status, status)})"
+                 for status, path in shown]
+        more = len(group) - len(shown)
+        tail = (f" and {more} more" if names else f"{more} not named") if more else ""
+        lines.append(f"changes {label}: " + ", ".join(names) + tail)
+        budget -= len(shown)
+    return lines
 
 
 # Lets a fetch ask for any sha the source holds, also one no ref names (policy._fetch leaves the default's tip so),
@@ -1257,6 +1515,47 @@ def sandbox_exec_direct_bytes(name: str, argv: list[str], *, env: tuple[tuple[st
                           capture_output=True, timeout=timeout + 60)
 
 
+OUTPUT_CHUNK = 1024 * 1024
+LINE_CAP = 32 * 1024 * 1024
+
+
+def sandbox_exec_direct_chunks(name: str, argv: list[str], *, env: tuple[tuple[str, str], ...] = (),
+                               timeout: int = 120) -> Iterator[bytes]:
+    """Stream a direct exec without buffering stdout or putting untrusted stderr on disk.
+
+    The remote deadline bounds the reader; a host deadline also bounds a stalled transport,
+    including a child that closes stdout but does not exit. No shell or startup file runs.
+    """
+    command = ["openshell", "sandbox", "exec", "-n", name, "--no-tty", "--no-login-shell", "--timeout",
+               str(timeout), *(f"--env={key}={value}" for key, value in env), "--", *argv]
+    deadline = time.monotonic() + timeout + 60
+    proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    try:
+        assert proc.stdout is not None
+        with selectors.DefaultSelector() as selector:
+            selector.register(proc.stdout, selectors.EVENT_READ)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not selector.select(remaining):
+                    raise subprocess.TimeoutExpired(command, timeout + 60)
+                chunk = os.read(proc.stdout.fileno(), OUTPUT_CHUNK)
+                if not chunk:
+                    break
+                yield chunk
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(command, timeout + 60)
+        returncode = proc.wait(timeout=remaining)
+        if returncode:
+            raise subprocess.CalledProcessError(returncode, command)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+        if proc.stdout is not None:
+            proc.stdout.close()
+
+
 def sandbox_exec_bytes(name: str, script: str, *, timeout: int = 120) -> subprocess.CompletedProcess:
     """The shell form in bytes mode."""
     return subprocess.run(["openshell", "sandbox", "exec", "-n", name, "--no-tty", "--no-login-shell", "--timeout",
@@ -1405,6 +1704,22 @@ def codex_install(dirs: tuple[PluginDir, ...]) -> str | None:
     return " && ".join([f"mkdir -p {CODEX_SKILLS} {CODEX_AGENTS}", *steps]) if steps else None
 
 
+DEVIN_SKILLS, DEVIN_AGENTS = f"{DEVIN_USER_DIR}/skills", f"{DEVIN_USER_DIR}/agents"
+
+
+def devin_install(dirs: tuple[PluginDir, ...]) -> str | None:
+    """The copies into Devin's user directory after the tarball is extracted: skills to skills/<skill>, subagent
+    profiles to agents/<agent>, where Devin reads them under XDG_CONFIG_HOME."""
+    steps: list[str] = []
+    for plugin in dirs:
+        base = f"/sandbox/plugins/{plugin.name}"
+        steps += [f"cp -R {shlex.quote(f'{base}/skills/{skill}')} {shlex.quote(f'{DEVIN_SKILLS}/{skill}')}"
+                  for skill in plugin.skills]
+        steps += [f"cp {shlex.quote(f'{base}/agents/{agent}')} {shlex.quote(f'{DEVIN_AGENTS}/{agent}')}"
+                  for agent in plugin.agents]
+    return " && ".join([f"mkdir -p {DEVIN_SKILLS} {DEVIN_AGENTS}", *steps]) if steps else None
+
+
 OMP_SKILLS, OMP_AGENTS = f"{pi.AGENT_DIR}/skills", "/tmp/pi-home/.omp/agent/agents"
 
 
@@ -1435,8 +1750,11 @@ def harness_command(harness: str, model: str | None, session_id: str | None = No
                     comms: bool = False, plugin_names: tuple[str, ...] = (), codex_hooks: bool = False,
                     pi_extras: PiPlugins | None = None, interactive: bool = False, automatic: bool = True) -> str:
     if harness == "claude":
-        command = ('claude -p "$(cat /sandbox/prompt.txt)" --output-format stream-json --verbose --setting-sources "" '
-                   '--settings /sandbox/claude-settings.json')
+        if interactive:
+            command = 'claude "$(cat /sandbox/prompt.txt)" --setting-sources "" --settings /sandbox/claude-settings.json'
+        else:
+            command = ('claude -p "$(cat /sandbox/prompt.txt)" --output-format stream-json --verbose --setting-sources "" '
+                       '--settings /sandbox/claude-settings.json')
         if comms:
             command += " --mcp-config /sandbox/aos-mcp.json --strict-mcp-config"
         for plugin in plugin_names:
@@ -1451,19 +1769,28 @@ def harness_command(harness: str, model: str | None, session_id: str | None = No
         # switch (docs/probes/2026-10-14-codex-mechanisms.md, finding 2: features.multi_agent=false alone left
         # spawn_agent on in codex-cli 0.162.1). Hooks fire under exec only with features.hooks=true and the trust bypass
         # (finding 1), opened when an AOS_OPENSHELL_CODEX_PLUGINS directory ships hooks.json or
-        # when comms is on with automatic delivery (the aos hooks, D37; AOS_OPENSHELL_COMMS=pull leaves them out).
-        aos_hooks = comms and automatic
-        hooks_on = codex_hooks or aos_hooks
+        # whenever comms is enabled: pull keeps lifecycle hooks but omits automatic delivery/finalization.
+        hooks_on = codex_hooks or comms
         trust = " --dangerously-bypass-hook-trust" if hooks_on else ""
         hooks = "true" if hooks_on else "false"
-        aos = "".join(f"-c {shlex.quote(arg)} " for arg in CODEX_MCP_ARGS + (CODEX_HOOK_ARGS if aos_hooks else ())) \
-            if comms else ""
+        aos = "".join(f"-c {shlex.quote(arg)} " for arg in
+                      CODEX_MCP_ARGS + CODEX_RECEIVER_ARGS + (CODEX_HOOK_ARGS if automatic else ())) if comms else ""
         return ('CODEX_HOME=/sandbox/codex-home codex exec --json --skip-git-repo-check --sandbox danger-full-access'
                 f'{trust} -c approval_policy="never" -c features.hooks={hooks} -c features.multi_agent=true '
                 f'-c agents.enabled=true {aos}-c features.plugins=false -c features.apps=false "$(cat /sandbox/prompt.txt)"')
     if harness == "pi":
         return pi_invocation(flavour, bin or flavour, provider, model, session_id, harness_timeout, pi_extras,
                              comms=comms, automatic=automatic, interactive=interactive).command
+    if harness == "devin":
+        # `dangerous` is the only mode that does not stop a print run at the first tool call it would ask about; the
+        # sandbox is the boundary, as for Codex's danger-full-access. Print mode refuses an untrusted directory.
+        command = (f"XDG_DATA_HOME={DEVIN_DATA} XDG_CONFIG_HOME={DEVIN_CONFIG_HOME} devin -p --prompt-file /sandbox/prompt.txt "
+                   "--permission-mode dangerous --respect-workspace-trust false")
+        if model is not None:
+            if not CLAUDE_MODEL_RE.fullmatch(model):
+                raise AdapterError(f"not a Devin model name: {model!r}")
+            command += f" --model {shlex.quote(model)}"
+        return command
     raise AdapterError(f"unsupported harness {harness!r}")
 
 
@@ -1570,6 +1897,7 @@ def main_script(harness: str, model: str | None, session_id: str | None = None, 
         "set -u",
         *([f"echo $$ > {MAIN_PID_FILE}"] if interactive else []),
         f"mkdir -p /tmp/claude-home {pi.AGENT_DIR} /tmp/pi-home /sandbox/codex-home /sandbox/incoming {pi.SESSION_DIR}",
+        *([f"mkdir -p {DEVIN_DATA}/devin {DEVIN_USER_DIR}"] if harness == "devin" else []),
         f"export CLAUDE_CONFIG_DIR=/tmp/claude-home PI_CODING_AGENT_DIR={pi.AGENT_DIR} CODEX_HOME=/sandbox/codex-home",
         *wait_job_lines(linger),
         SERVICES_ENV,
@@ -1589,8 +1917,11 @@ def accept_script(commands: list[str], linger: int = 900 + LINGER_MARGIN, eviden
              for i, command in enumerate(commands)]
     before = ([f"( {evidence.listing_script(evidence_dir)} ) >{openshell_evidence.BEFORE_FILE} 2>/dev/null; true"]
               if evidence_dir else [])
+    # Verification gates U3: a command that writes JUnit XML into $AOS_TEST_RESULTS gets a test-by-test before and
+    # after comparison; the directory is outside the result tree, so it changes nothing the commands read.
+    results = [f"export AOS_TEST_RESULTS={evidence.TEST_RESULTS_DIR}", 'mkdir -p "$AOS_TEST_RESULTS"']
     return "\n".join(["set -u", "mkdir -p /sandbox/incoming", *wait_job_lines(linger), SERVICES_ENV,
-                      "mkdir -p /sandbox/repo && tar xzf /sandbox/job.tgz -C /sandbox/repo", *before, *steps,
+                      "mkdir -p /sandbox/repo && tar xzf /sandbox/job.tgz -C /sandbox/repo", *results, *before, *steps,
                       "touch /sandbox/accept.done", f"sleep {linger}"]) + "\n"
 
 
@@ -1621,11 +1952,11 @@ def run_fresh_acceptance(settings: Settings, name: str, policy_path: str, render
 def accept_fresh(settings: Settings, name: str, policy_path: str, rendered: str, tarball: str, commands: list[str],
                  stop: threading.Event | None = None, auth: pi.PiAuth | None = None,
                  env_file: str | None = None, evidence_dir: str | None = None,
-                 secret: str | None = None) -> tuple[int, str]:
+                 secret: Secret = None) -> tuple[int, str]:
     """Independent acceptance: a new sandbox from the same image under the separately rendered acceptance
     policy (no harness hosts, no provider or credential), the result tree from the tarball, released only
     after a strict effective-policy check. The caller tracks and deletes the sandbox. Returns (passed, output).
-    `secret` is a comms-on run's claim token, hidden with its cut fragments from the output (S7)."""
+    `secret` is the run's secret or secrets (see `hide`), hidden with their cut fragments from the output (S7)."""
     run_fresh_acceptance(settings, name, policy_path, rendered, tarball, commands, stop=stop, env_file=env_file,
                          evidence_dir=evidence_dir)
     passed, outputs = 0, []
@@ -1642,11 +1973,42 @@ def accept_fresh(settings: Settings, name: str, policy_path: str, rendered: str,
 
 
 def baseline_fresh(settings: Settings, name: str, policy_path: str, rendered: str, tarball: str,
-                   commands: list[str], *, stop: threading.Event | None, env_file: str | None) -> list[int | None]:
-    """The acceptance commands on the job tree before the agent: each command's exit code, None when it did not run."""
+                   commands: list[str], *, stop: threading.Event | None, env_file: str | None
+                   ) -> tuple[list[int | None], dict[str, str] | None, list[str]]:
+    """The acceptance commands on the job tree before the agent: each command's exit code (None when it did not run),
+    then the test-level outcomes its commands wrote as JUnit XML (None: no comparison) and a note per file left out,
+    read here because the caller deletes this sandbox (verification gates U3)."""
     run_fresh_acceptance(settings, name, policy_path, rendered, tarball, commands, stop=stop, env_file=env_file,
                          evidence_dir=None)
-    return openshell_evidence.exit_codes(name, len(commands))
+    codes = openshell_evidence.exit_codes(name, len(commands))
+    outcomes, notes = openshell_evidence.read_test_outcomes(name)
+    return codes, outcomes, notes
+
+
+ALREADY_PASSES = ("acceptance already passes before the agent ({detail}): the task has nothing for the agent to "
+                  "fix; add it with --regression-guard if it guards behaviour that already works")
+
+
+def compare_tests(before: dict[str, str] | None, after: dict[str, str] | None, *,
+                  acceptance_passed: bool) -> tuple[list[str], list[dict[str, str]] | None]:
+    """Verification gates U3: the report lines comparing test outcomes before and after the agent, and the lost tests
+    to post with a passing result (None when there is nothing to post). A test that now fails is listed only when
+    acceptance still passed; otherwise that failure is the verdict already."""
+    if before is None or after is None:
+        side = ("before or after" if before is None and after is None else "before" if before is None else "after")
+        return [f"test comparison: none (no JUnit results {side} the agent; commands write them to "
+                f"$AOS_TEST_RESULTS)"], None
+    lost = evidence.lost_tests(before, after, failures=acceptance_passed)
+    if not lost:
+        return [f"test comparison: {len(before)} tests before, {len(after)} after; none that passed was lost"], None
+    named = ", ".join(f"{entry['test']} ({entry['after']})" for entry in lost[:20])
+    more = f" and {len(lost) - 20} more" if len(lost) > 20 else ""
+    lines = [f"test comparison: {len(lost)} passed before the agent and not after: {named}{more}"]
+    if not acceptance_passed:
+        return lines, None
+    lines.append("test comparison: accept and merge wait for a recorded reason (aos record-check <task> "
+                 "test-changes --commit <head> --waive --note TEXT)")
+    return lines, lost[:evidence.TEST_CHANGES_MAX]
 
 
 def wait_for(name: str, path: str, timeout: int, interval: float = 5.0, stop: threading.Event | None = None) -> float:
@@ -1659,6 +2021,86 @@ def wait_for(name: str, path: str, timeout: int, interval: float = 5.0, stop: th
         if clock() - started > timeout:
             raise TimeoutError(f"{path} did not appear within {timeout} s")
         pause(interval)
+
+
+def wait_for_interactive_ready(name: str, stop: threading.Event, timeout: int = 60) -> bool:
+    """Observe the session, not just sandbox creation. A harness that already exited is not ready."""
+    deadline = clock() + timeout
+    while True:
+        if stop.is_set():
+            raise AdapterError("run lease lost while waiting for the interactive session")
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise TimeoutError(f"interactive session did not appear within {timeout} s")
+        probe = sandbox_exec_direct(name, ["/usr/bin/tmux", "-S", TMUX_SOCKET, "has-session", "-t", TMUX_SESSION],
+                                    timeout=max(1, min(20, int(remaining))))
+        if stop.is_set():
+            raise AdapterError("run lease lost while waiting for the interactive session")
+        if probe.returncode == 0:
+            return True
+        if sandbox_exec_direct(name, ["/usr/bin/test", "-e", "/sandbox/harness.rc"], timeout=20).returncode == 0:
+            return False
+        pause(min(1, max(0, deadline - clock())))
+
+
+INTERACTIVE_READY_HOOK_TIMEOUT = 30
+
+
+class InteractiveReadyHook:
+    """A host notification, never part of the verdict. The monitor alone waits/reaps."""
+
+    def __init__(self, argv: tuple[str, ...], *, task_id: str, run_id: str, sandbox: str, harness: str):
+        self._lock = threading.Lock()
+        self._outcome: str | None = None
+        self._process: subprocess.Popen | None = None
+        env = {"PATH": os.defpath, "AOS_TASK_ID": task_id, "AOS_RUN_ID": run_id,
+               "AOS_SANDBOX_NAME": sandbox, "AOS_HARNESS": harness, "AOS_ATTACH_COMMAND": f"aos attach {run_id}"}
+        try:
+            self._process = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                             stderr=subprocess.DEVNULL, start_new_session=True)
+            threading.Thread(target=self._monitor, name="interactive-ready-hook", daemon=True).start()
+        except Exception as exc:  # notification failures must not escape into the run
+            self._outcome = f"start failed ({type(exc).__name__})"
+            self._kill()
+
+    def _kill(self) -> None:
+        if self._process is not None:
+            try:
+                os.killpg(self._process.pid, signal.SIGKILL)
+            except OSError:
+                # Restricted hosts may permit signaling a child but not its process group.
+                try:
+                    self._process.kill()
+                except OSError:
+                    pass
+
+    def _monitor(self) -> None:
+        try:
+            code = self._process.wait(timeout=INTERACTIVE_READY_HOOK_TIMEOUT)
+            with self._lock:
+                if self._outcome is None:
+                    self._outcome = f"exit {code}"
+        except subprocess.TimeoutExpired:
+            with self._lock:
+                if self._outcome is None:
+                    self._outcome = f"timed out after {INTERACTIVE_READY_HOOK_TIMEOUT} s"
+                    self._kill()
+            self._process.wait()
+        except Exception as exc:
+            with self._lock:
+                if self._outcome is None:
+                    self._outcome = f"monitor failed ({type(exc).__name__})"
+                    self._kill()
+
+    def finish(self) -> str:
+        """Snapshot the outcome without joining; don't leave a hook running after its run."""
+        with self._lock:
+            if self._outcome is None:
+                code = self._process.poll()
+                self._outcome = f"exit {code}" if code is not None else "stopped at run end"
+                if code is None:
+                    self._kill()
+            return "interactive ready hook: " + self._outcome
 
 
 def _entry_key(kind: str, entry: dict) -> str:
@@ -1768,10 +2210,14 @@ def bus_url(settings: Settings) -> str:
     return f"{urlsplit(settings.url).scheme or 'http'}://{host}:{settings.bus_port}"
 
 
+LOCKED_PROMPT = ("Locked paths (git globs): {paths}. Your commits must not add, change or delete anything they "
+                 "match; the run fails before acceptance if they do. If the task needs one changed, stop and report.\n\n")
+
+
 def build_prompt(task: dict[str, Any], verify_skill: bool = False, evidence: str | None = None,
                  comms: bool = False, harness: str | None = None, repository_instructions: str | None = None,
                  previous: dict[str, Any] | None = None, continuing: bool = False, interactive: bool = False,
-                 automatic: bool = True) -> str:
+                 automatic: bool = True, locked: tuple[str, ...] = ()) -> str:
     acceptance = "\n".join(f"  - {c}" for c in task.get("acceptance") or []) or "  (none)"
     extra = "".join(f"{paragraph}\n\n" for paragraph in ((VERIFY_SKILL_LINE,) if verify_skill else ())
                     + ((evidence,) if evidence else ()))
@@ -1792,14 +2238,19 @@ def build_prompt(task: dict[str, Any], verify_skill: bool = False, evidence: str
     reviewed = (f"This task reviews task {reviews}: its branch ao/{reviews} is in your checkout to read; "
                 "commit your own work on the current branch.\n") if reviews else ""
     repository = f"Repository instructions:\n{repository_instructions}\n\n" if repository_instructions else ""
+    # Verification gates U1: the agent learns the locked paths before it spends a run finding them out.
+    if locked:
+        repository += LOCKED_PROMPT.format(paths=", ".join(locked))
     text = (f"Task {task['id']}: {task['title']}\n{origin}{reviewed}\n{(task.get('brief') or '').strip()}\n\n"
             f"Acceptance commands (run from the repository root; they must pass):\n{acceptance}\n\n{repository}{extra}"
             "Work only inside the current repository checkout. Commit your changes on the current branch "
             "with a clear message. On a denied path, host or file, stop and report what was missing.\n\n"
             f"{HANDOFF_PROMPT_INTERACTIVE if interactive else HANDOFF_PROMPT}\n")
-    paragraph = COMMS_PROMPTS.get(harness or "", COMMS_PROMPT)  # `harness`: codex, or a Pi run's flavour
+    paragraph = COMMS_PROMPTS.get(harness or "", COMMS_PROMPT)  # `harness`: codex, devin, or a Pi run's flavour
     if interactive and harness == "omp":
         paragraph = COMMS_PROMPT_OMP_INTERACTIVE + "\n" + COMMS_PROMPT_OMP_COORDINATOR
+    elif interactive and harness == "claude":
+        paragraph = COMMS_PROMPT_CLAUDE_INTERACTIVE
     if not automatic:
         paragraph += "\n" + COMMS_PULL_PROMPT.format(inbox=COMMS_INBOX.get(harness or "", "aos_inbox"))
     if interactive and comms:
@@ -1862,10 +2313,16 @@ def pi_admission(settings: Settings) -> PiPlan:
     missing = [grant for grant in pi.REQUIRED_GRANTS[auth_provider] if grant not in granted]
     if missing:
         raise AdapterError("AOS_OPENSHELL_HARNESS_HOSTS_PI must grant " + ", ".join(missing))
-    if not settings.pi_auth:
-        raise AdapterError("AOS_OPENSHELL_PI_AUTH is required for a Pi run (the worker's exported auth.json)")
+    if settings.pi_auth and settings.pi_login:
+        raise AdapterError("AOS_OPENSHELL_PI_AUTH and AOS_OPENSHELL_PI_LOGIN are both set; select one worker auth")
+    if not settings.pi_auth and not settings.pi_login:
+        raise AdapterError("AOS_OPENSHELL_PI_AUTH is required for a Pi run (the worker's exported auth.json), "
+                           "or AOS_OPENSHELL_PI_LOGIN (the worker's persistent omp login directory)")
     try:
-        auth = pi.selected_auth(settings.pi_auth, min_validity_seconds=settings.harness_timeout + 300)
+        if settings.pi_login:  # renewed here, before claim, by the host omp under the login's lock
+            auth = pi.login_auth(settings.pi_login, settings.harness_timeout + 300, bin=settings.pi_login_bin)
+        else:
+            auth = pi.selected_auth(settings.pi_auth, min_validity_seconds=settings.harness_timeout + 300)
     except pi.AuthError as exc:
         raise AdapterError(f"Pi auth: {exc}") from None
     if settings.pi_account_id and auth.account_id != settings.pi_account_id:
@@ -1905,6 +2362,7 @@ def local_capabilities(plan: PiPlan, invocation: pi.Invocation) -> list[str]:
 def sandbox_capabilities(name: str, plan: PiPlan, invocation: pi.Invocation, *, interactive: bool = False) -> tuple[str | None, list[str]]:
     binary = shlex.quote(plan.bin)
     query = f"{binary} --version 2>&1; echo {CAPABILITY_SEPARATOR}; {binary} --help 2>&1"
+
     if interactive:
         query += "; command -v tmux && command -v timeout"
     result = sandbox_exec(name, query, timeout=60)
@@ -1924,6 +2382,23 @@ def sandbox_capabilities(name: str, plan: PiPlan, invocation: pi.Invocation, *, 
     if missing:
         raise AdapterError(f"{plan.flavour}: {plan.bin} in the image lacks required flags: {', '.join(missing)}")
     return version, warnings
+def check_claude_interactive_capabilities(name: str) -> str:
+    """Reject an image without Claude Code's interactive CLI or the terminal runtime before releasing the job."""
+    query = ("claude --version 2>&1; echo " + CAPABILITY_SEPARATOR +
+             "; claude --help 2>&1; command -v tmux && command -v timeout")
+    result = sandbox_exec(name, query, timeout=60)
+    version, separator, rest = result.stdout.partition(CAPABILITY_SEPARATOR)
+    help_text = rest.partition("\n")[2]
+    if (result.returncode or not separator or "Usage: claude" not in help_text
+            or not all(flag in help_text for flag in ("--mcp-config", "--settings", "--setting-sources"))):
+        raise AdapterError("interactive Claude requires Claude Code with interactive CLI, MCP, settings, tmux and timeout support")
+    for argv in (["/usr/bin/test", "-x", "/usr/bin/tmux"],
+                 ["/usr/bin/test", "-x", "/usr/bin/timeout"],
+                 ["/usr/bin/test", "-r", "/usr/local/lib/aos-agent/attach.lock"]):
+        if sandbox_exec_direct(name, argv).returncode:
+            raise AdapterError("interactive: the image lacks tmux, timeout or the attach lock file")
+    return version.strip()
+
 
 
 def _protocol_compatible(value: str, requirement: str = AOS_AGENT_PROTOCOL) -> bool:
@@ -1950,8 +2425,9 @@ try:
     if (not isinstance(data, dict)
             or not isinstance(data.get("pending_requests"), list)
             or not isinstance(data.get("overlaps"), list)
+            or not isinstance(data.get("retained_requests"), list)
             or any(not isinstance(row, dict) or not isinstance(row.get("id"), str)
-                   for row in data["pending_requests"])
+                   for row in data["pending_requests"] + data["retained_requests"])
             or any(not isinstance(row, str) for row in data["overlaps"])):
         raise ValueError("invalid requests response")
 except Exception:
@@ -1975,7 +2451,7 @@ def check_comms_readiness(name: str, *, run_id: str, extension: bool, interactiv
             raise AdapterError(f"messaging readiness {label}: {detail.splitlines()[0] if detail else 'no output'}")
         return text
 
-    required = AOS_AGENT_PROTOCOL_INTERACTIVE if interactive else AOS_AGENT_PROTOCOL
+    required = AOS_AGENT_PROTOCOL
     stamp = probe("helper version", "/usr/local/bin/aos-agent version")
     prefix = "aos-agent protocol "
     if not stamp.startswith(prefix) or not _protocol_compatible(stamp[len(prefix):], required):
@@ -2005,12 +2481,17 @@ try {
   const required = REQUIRED.split(".").map(Number);
   if (!v || Number(v[1]) !== required[0] || Number(v[2]) < required[1])
     fail("incompatible extension protocol " + String(m.protocol));
-  const handlers = new Set();
-  await m.default({on: (name, handler) => {
-    if (typeof handler === "function") handlers.add(name);
-  }, sendUserMessage() {}, sendMessage() {}});
-  if (!["session_start", "tool_result", "turn_end"].every(name => handlers.has(name)))
-    fail("extension missing required handlers");
+  for (const automatic of ["0", "1"]) {
+    process.env.AOS_AGENT_AUTOMATIC = automatic;
+    const handlers = new Set();
+    await m.default({on: (name, handler) => {
+      if (typeof handler === "function") handlers.add(name);
+    }, sendUserMessage() {}, sendMessage() {}});
+    const requiredHandlers = ["session_start", "session_shutdown", "session_switch",
+      ...(automatic === "1" ? ["context", "tool_result", "turn_end", "agent_start", "agent_end"] : [])];
+    if (!requiredHandlers.every(name => handlers.has(name)))
+      fail("extension missing required handlers");
+  }
 } catch (error) { fail(String(error)); }
 """.replace("REQUIRED", json.dumps(required))
         probe("extension registration", "node --input-type=module -e " + shlex.quote(driver))
@@ -2023,7 +2504,7 @@ try {
         raise AdapterError("messaging readiness bus: authenticated sandbox probe failed")
 
 
-def comms_summary(name: str, *, secret: str | None, auth: pi.PiAuth | None) -> str:
+def comms_summary(name: str, *, secret: Secret, auth: pi.PiAuth | None) -> str:
     """Bound retained summary bytes and keep helper failure visible without losing the run result."""
     try:
         # Python in isolated mode: the agent's user-site code under /sandbox/.local never loads (F137).
@@ -2037,107 +2518,203 @@ def comms_summary(name: str, *, secret: str | None, auth: pi.PiAuth | None) -> s
         return f"messaging: summary unavailable ({type(exc).__name__})"
 
 
-def collect_pi(name: str, plan: PiPlan, invocation: pi.Invocation, returncode: int | None, state: Path,
-               run_id: str, requested: str | None, secret: str | None = None, *,
-               database: openshell_services.Database | None = None) -> tuple[pi.PiResult, Path | None, Path]:
-    """Read back at most RAW_CAP+1 bytes of Pi stdout, parse, and retain scrubbed evidence (mode 600): the run's
-    database password (F111), the auth and the claim token removed. Every failure here is contained: it can never
-    skip deletion or result posting."""
-    raw: bytes | None = None
-    collection_error = None
-    interrupt: KeyboardInterrupt | None = None
-    try:
-        got = sandbox_exec_direct_bytes(name, ["/usr/bin/head", "-c", str(pi.RAW_CAP + 1), "/sandbox/harness.out"],
-                                        timeout=120)
-        if got.returncode == 0:
-            raw = got.stdout
-        else:
-            collection_error = f"exec exited {got.returncode}"
-    except KeyboardInterrupt as exc:  # SIGTERM: record it, then let the run report "runner interrupted"
-        collection_error, interrupt = "KeyboardInterrupt", exc
-    except Exception as exc:  # noqa: BLE001 -- contained by design
-        collection_error = type(exc).__name__
-    if raw is None:
-        result = pi.PiResult(None, None, "pi: harness output could not be collected", None, False)
-    else:
-        result = pi.FLAVOURS[plan.flavour].parser(raw, returncode, invocation.expected_session_id)
+@dataclasses.dataclass
+class _HarnessOutput:
+    raw_bytes: int | None = None
     events: Path | None = None
+    oversized: bool = False
+    long_line: bool = False
+    truncated: bool = False
+    collection_error: str | None = None
+
+    def failed(self, exc: BaseException) -> None:
+        self.collection_error = (f"exec exited {exc.returncode}" if isinstance(exc, subprocess.CalledProcessError)
+                                 else type(exc).__name__)
+        self.truncated = bool(self.raw_bytes)
+
+    def error(self, cap_mib: int, returncode: int | None) -> str | None:
+        if self.collection_error:
+            return "pi: harness output could not be collected"
+        if not (self.oversized or self.long_line):
+            return None
+        if returncode is None:
+            return "pi: harness did not exit (timeout, cancellation or collection failure)"
+        if returncode != 0:
+            return f"pi: harness exited {returncode}"
+        if self.long_line:
+            return f"pi: output line exceeds the {LINE_CAP // (1024 * 1024)} MiB limit"
+        return f"pi: output exceeds the {cap_mib} MiB cap"
+
+
+def _harness_lines(name: str, path: str, state: Path, cap_mib: int,
+                   scrub: Callable[[bytes], bytes], output: _HarnessOutput) -> Iterator[bytes]:
+    """Copy scrubbed evidence and yield raw lines to the parser. Only clean EOF admits a partial line.
+
+    At most LINE_CAP bytes per line are admitted to redaction/JSON. No raw spool exists.
+    A deadline of 120 + cap MiB seconds allows 1 MiB/s plus startup, with 60 s host transport grace.
+    """
+    cap = cap_mib * 1024 * 1024
+    chunks = sandbox_exec_direct_chunks(name, ["/usr/bin/head", "-c", str(cap + 1), path],
+                                        timeout=120 + cap_mib)
+    stream = None
+    pending = bytearray()
+
+    def open_events():
+        nonlocal stream
+        events = state / "session.jsonl"
+        fd = os.open(events, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        stream = os.fdopen(fd, "wb")
+        os.fchmod(stream.fileno(), 0o600)
+        output.events = events
+
+    def retain(line: bytes) -> None:
+        assert stream is not None
+        clean = scrub(line)
+        view = memoryview(clean)
+        for start in range(0, len(view), OUTPUT_CHUNK):
+            stream.write(view[start:start + OUTPUT_CHUNK])
+
+    try:
+        for chunk in chunks:
+            if not chunk:
+                continue
+            before = output.raw_bytes or 0
+            output.raw_bytes = before + len(chunk)
+            if stream is None:
+                open_events()
+            # The direct head reads at most cap+1; the extra byte is never evidence.
+            search = len(pending)  # the existing partial line contains no newline
+            pending.extend(chunk[:max(0, cap - before)])
+            output.oversized = output.raw_bytes > cap
+            output.truncated = output.oversized
+            start = 0
+            while (end := pending.find(b"\n", search)) >= 0:
+                if end + 1 - start > LINE_CAP:
+                    output.long_line = output.truncated = True
+                    return
+                line = bytes(memoryview(pending)[start:end + 1])
+                retain(line)
+                yield line
+                del line
+                start = end + 1
+                search = start
+            del pending[:start]
+            if len(pending) > LINE_CAP:
+                output.long_line = output.truncated = True
+                return
+        if stream is None:  # successful empty read, not a failure before the first byte
+            output.raw_bytes = 0
+            open_events()
+        if pending and not output.oversized:
+            line = bytes(pending)
+            retain(line)
+            yield line
+    finally:
+        chunks.close()
+        if stream is not None:
+            stream.close()
+
+
+def collect_pi(name: str, plan: PiPlan, invocation: pi.Invocation, returncode: int | None, state: Path,
+               run_id: str, requested: str | None, secret: Secret = None, *,
+               database: openshell_services.Database | None = None,
+               cap_mib: int = 512) -> tuple[pi.PiResult, Path | None, Path]:
+    """Parse raw lines while retaining scrubbed evidence; failures never skip result posting or cleanup."""
+    output = _HarnessOutput()
+    interrupt: KeyboardInterrupt | None = None
+
+    def scrub(line: bytes) -> bytes:
+        clean = pi.redact_bytes(database.redact_bytes(line) if database is not None else line, plan.auth)
+        return hide_bytes(clean, secret)
+
+    lines = _harness_lines(name, "/sandbox/harness.out", state, cap_mib, scrub, output)
+    result = pi.PiResult(None, None, "pi: harness output could not be collected", None, False)
+    try:
+        result = pi.FLAVOURS[plan.flavour].parser(lines, returncode, invocation.expected_session_id)
+        # A malformed record ends parsing, not evidence collection.
+        for _ in lines:
+            pass
+    except KeyboardInterrupt as exc:
+        output.failed(exc)
+        interrupt = exc
+    except Exception as exc:  # noqa: BLE001 -- contained by design
+        output.failed(exc)
+    finally:
+        lines.close()
+    error = output.error(cap_mib, returncode)
+    if error:
+        result = dataclasses.replace(result, text=None, error=error)
     diagnostics = state / "pi-diagnostics.json"
     try:
-        if raw is not None and len(raw) <= pi.RAW_CAP:
-            events = state / "session.jsonl"
-            scrubbed = pi.redact_bytes(database.redact_bytes(raw) if database is not None else raw, plan.auth)
-            if secret:
-                scrubbed = scrubbed.replace(secret.encode(), b"***")
-            _write_private(events, scrubbed)
         _write_private(diagnostics, json.dumps({
             "run_id": run_id, "flavour": plan.flavour, "requested_session_id": requested,
             "observed_session_id": result.session_id, "returncode": returncode, "error": result.error,
             "stop_reason": result.stop_reason, "settled": result.settled,
-            "raw_bytes": None if raw is None else len(raw), "oversized": raw is not None and len(raw) > pi.RAW_CAP,
-            "collection_error": collection_error, "session_events": str(events) if events else None,
+            "raw_bytes": output.raw_bytes, "oversized": output.oversized, "truncated": output.truncated,
+            "collection_error": output.collection_error, "session_events": str(output.events) if output.events else None,
         }, indent=2).encode())
     except OSError:
-        events = None
+        output.events = None
     if interrupt is not None:
         raise interrupt
-    return result, events, diagnostics
+    return result, output.events, diagnostics
 
 
-def collect_interactive(name: str, plan: PiPlan, state: Path, run_id: str, secret: str | None,
+def collect_interactive(name: str, plan: PiPlan | None, state: Path, run_id: str, secret: Secret,
                         database: openshell_services.Database | None, *,
-                        submission: str | None) -> tuple[str | None, Path | None, Path]:
-    """Retain bounded, scrubbed session evidence; collection failures never skip the result or cleanup."""
-    raw = None
+                        submission: str | None, cap_mib: int = 512,
+                        output: _HarnessOutput | None = None) -> tuple[str | None, Path | None, Path]:
+    """Retain the newest session file without parsing its events; only its first line identifies it."""
+    output = output if output is not None else _HarnessOutput()
     observed = None
-    events = None
-    collection_error = None
     interrupt = None
-    diagnostics = state / "pi-diagnostics.json"
+    diagnostics = state / ("pi-diagnostics.json" if plan else "claude-interactive-diagnostics.json")
+
+    def scrub(line: bytes) -> bytes:
+        clean = hide_bytes(pi.redact_bytes(line, plan.auth if plan else None), secret)
+        if database is not None:
+            for spelling in sorted({database.password, quote(database.password, safe="")}, key=len, reverse=True):
+                clean = clean.replace(spelling.encode(), b"***")
+        return clean
+
     try:
-        listing = sandbox_exec_direct(name, ["/usr/bin/ls", "-t", "/sandbox/pi-sessions"])
-        newest = next((line for line in listing.stdout.splitlines() if line.endswith(".jsonl")), None)
-        if listing.returncode or newest is None:
-            collection_error = "session file not found"
-        else:
-            path = f"/sandbox/pi-sessions/{newest}"
-            got = sandbox_exec_direct_bytes(name, ["/usr/bin/head", "-c", str(pi.RAW_CAP + 1), path])
-            if got.returncode:
-                collection_error = f"exec exited {got.returncode}"
+        if plan is not None:
+            listing = sandbox_exec_direct(name, ["/usr/bin/ls", "-t", "/sandbox/pi-sessions"])
+            newest = next((line for line in listing.stdout.splitlines() if line.endswith(".jsonl")), None)
+            if listing.returncode or newest is None:
+                output.collection_error = "session file not found"
             else:
-                raw = got.stdout
+                path = f"/sandbox/pi-sessions/{newest}"
+                lines = _harness_lines(name, path, state, cap_mib, scrub, output)
                 try:
-                    header = json.loads(raw.splitlines()[0])
-                    if header.get("type") == "session" and pi._canonical_uuid(header.get("id")):
-                        observed = header["id"]
-                except (ValueError, IndexError, AttributeError, TypeError):
-                    pass
+                    for index, line in enumerate(lines):
+                        if index == 0:
+                            try:
+                                header = json.loads(line)
+                                if header.get("type") == "session" and pi._canonical_uuid(header.get("id")):
+                                    observed = header["id"]
+                            except (ValueError, AttributeError, TypeError):
+                                pass
+                finally:
+                    lines.close()
     except KeyboardInterrupt as exc:
-        collection_error, interrupt = "KeyboardInterrupt", exc
+        output.failed(exc)
+        interrupt = exc
     except Exception as exc:  # noqa: BLE001 -- diagnostics are best effort
-        collection_error = type(exc).__name__
+        output.failed(exc)
     try:
-        if raw is not None and len(raw) <= pi.RAW_CAP:
-            scrubbed = pi.redact_bytes(raw, plan.auth)
-            if secret:
-                scrubbed = scrubbed.replace(secret.encode(), b"***")
-            if database is not None:
-                for spelling in sorted({database.password, quote(database.password, safe="")}, key=len, reverse=True):
-                    scrubbed = scrubbed.replace(spelling.encode(), b"***")
-            events = state / "session.jsonl"
-            _write_private(events, scrubbed)
         _write_private(diagnostics, json.dumps({
-            "run_id": run_id, "flavour": plan.flavour, "interactive": True,
+            "run_id": run_id, "harness": plan.flavour if plan else "claude", "interactive": True,
             "submission": submission,
-            "observed_session_id": observed, "session_events": str(events) if events else None,
-            "raw_bytes": None if raw is None else len(raw), "oversized": raw is not None and len(raw) > pi.RAW_CAP,
-            "collection_error": collection_error,
+            "observed_session_id": observed, "session_events": str(output.events) if output.events else None,
+            "raw_bytes": output.raw_bytes, "oversized": output.oversized, "truncated": output.truncated,
+            "collection_error": output.collection_error,
         }, indent=2).encode())
     except OSError:
-        events = None
+        output.events = None
     if interrupt is not None:
         raise interrupt
-    return observed, events, diagnostics
+    return observed, output.events, diagnostics
 
 
 def _write_private(path: Path, data: bytes) -> None:
@@ -2147,36 +2724,48 @@ def _write_private(path: Path, data: bytes) -> None:
     os.chmod(path, 0o600)
 
 
-def hide(text: str | None, secret: str | None, *, edges: bool = False) -> str | None:
-    """The claim token of a comms-on run replaced by `***` wherever the runner posts or prints text (agent-comms U3, S7).
-    With ``edges`` a leading suffix or trailing prefix of the token of at least pi.MIN_FRAGMENT characters is replaced
-    too: what a `tail -c` or `head -c` cut inside the sandbox leaves of a token (the pi._scrub_edges rule)."""
-    if text is None or not secret:
+def _secret_values(secret: Secret) -> tuple[str, ...]:
+    """The non-empty values of a `secret` argument, longest first, so that one inside another leaves no tail of it."""
+    values = (secret,) if isinstance(secret, str) else secret or ()
+    return tuple(sorted((value for value in values if value), key=len, reverse=True))
+
+
+def hide(text: str | None, secret: Secret, *, edges: bool = False) -> str | None:
+    """The run's secrets replaced by `***` wherever the runner posts or prints text: the claim token of a comms-on run
+    (agent-comms U3, S7), a Devin run's key, or both as a tuple. With ``edges`` a leading suffix or trailing prefix of
+    a secret of at least pi.MIN_FRAGMENT characters is replaced too: what a `tail -c` or `head -c` cut inside the
+    sandbox leaves of one (the pi._scrub_edges rule)."""
+    values = _secret_values(secret)
+    if text is None or not values:
         return text
-    text = text.replace(secret, "***")
+    for value in values:
+        text = text.replace(value, "***")
     if edges:
-        for size in range(min(len(secret) - 1, len(text)), pi.MIN_FRAGMENT - 1, -1):
-            if text.startswith(secret[-size:]):
-                text = "***" + text[size:]
-                break
-        for size in range(min(len(secret) - 1, len(text)), pi.MIN_FRAGMENT - 1, -1):
-            if text.endswith(secret[:size]):
-                text = text[:-size] + "***"
-                break
+        for value in values:
+            for size in range(min(len(value) - 1, len(text)), pi.MIN_FRAGMENT - 1, -1):
+                if text.startswith(value[-size:]):
+                    text = "***" + text[size:]
+                    break
+            for size in range(min(len(value) - 1, len(text)), pi.MIN_FRAGMENT - 1, -1):
+                if text.endswith(value[:size]):
+                    text = text[:-size] + "***"
+                    break
     return text
 
 
-def hide_bytes(data: bytes, secret: str | None) -> bytes:
-    """`hide` over bytes for the evidence files, whole token only (a cut fragment stays `hide`'s text-level concern)."""
-    return data.replace(secret.encode(), b"***") if secret else data
+def hide_bytes(data: bytes, secret: Secret) -> bytes:
+    """`hide` over bytes for the evidence files, whole secrets only (a cut fragment stays `hide`'s text-level concern)."""
+    for value in _secret_values(secret):
+        data = data.replace(value.encode(), b"***")
+    return data
 
 
 # -- ownership markers and reconciliation ------------------------------------------------------
 
 OWNER_FILE = "owner.json"
 # Per-run scratch that must not outlive the run: job and result tarballs, the bundle, credential snapshots.
-SCRATCH_FILES = ("job.tgz", "out.bundle", "auth.json", "pi-auth.json", "result.tgz", "services.env", "evidence.tgz",
-                 "aos-run.json", "plugins.tgz")
+SCRATCH_FILES = ("job.tgz", "out.bundle", "auth.json", "pi-auth.json", "devin-credentials.toml", "result.tgz",
+                 "services.env", "evidence.tgz", "aos-run.json", "plugins.tgz")
 SERVICES_FILE = "services.json"  # present while this run owns a database; reconcile stops it
 
 
@@ -2265,7 +2854,7 @@ def reconcile(client: httpx.Client, settings: Settings, err: IO[str]) -> int:
 
 # -- the run -------------------------------------------------------------------------
 
-CRITICAL_ORDER = ("policy", "session", "result", "baseline", "push", "sandbox")
+CRITICAL_ORDER = ("policy", "session", "result", "changes", "baseline", "push", "sandbox")
 
 
 def baseline_comparison(commands: list[str], before: list[int | None], after: list[int | None]) -> tuple[list[str], str]:
@@ -2345,8 +2934,15 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
         print(f"task harness is {harness}; the OpenShell adapter supports {', '.join(HARNESSES)}", file=err)
         return 1
     interactive = task.get("execution") == "interactive"
-    if interactive and not (harness == "pi" and settings.pi_flavour == "omp" and settings.comms and not settings.comms_pull):
+    if interactive and not (
+        (harness == "pi" and settings.pi_flavour == "omp" and settings.comms and not settings.comms_pull)
+        or (harness == "claude" and settings.comms and not settings.comms_pull)
+    ):
         return refuse(INTERACTIVE_PREREQUISITES)
+    if interactive and harness == "claude" and not any(
+        grant.lower() == "platform.claude.com:443" for grant in settings.harness_hosts.get("claude", ())
+    ):
+        return refuse("interactive Claude needs AOS_OPENSHELL_HARNESS_HOSTS_CLAUDE to grant platform.claude.com:443")
     if harness == "codex" and not settings.codex_auth:
         print("AOS_OPENSHELL_CODEX_AUTH is required for a Codex run", file=err)
         return 1
@@ -2359,6 +2955,19 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
             dirs = plugin_dirs(PLUGIN_KEYS["codex"], settings.codex_plugins, "codex")
         elif harness == "pi" and settings.pi_plugins:
             dirs = plugin_dirs(PLUGIN_KEYS["pi"], settings.pi_plugins, "pi")
+        elif harness == "devin" and settings.devin_plugins:
+            dirs = plugin_dirs(PLUGIN_KEYS["devin"], settings.devin_plugins, "devin")
+            if settings.comms:
+                for plugin in dirs:
+                    if plugin.agents:
+                        raise AdapterError(
+                            f"{PLUGIN_KEYS['devin']}: {plugin.root}/agents/{plugin.agents[0]}: "
+                            "a Devin run with messaging on sets subagents_enabled false, so the profile could not run")
+                    if plugin.skills:
+                        raise AdapterError(
+                            f"{PLUGIN_KEYS['devin']}: {plugin.root}/skills/{plugin.skills[0]}: "
+                            "a Devin run with messaging on cannot take plugin skills, "
+                            "which can start a child that shares the run's session id")
     except AdapterError as exc:
         print(str(exc), file=err)
         return 1
@@ -2366,9 +2975,10 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
     tar_roots, tar_names = roots + tuple(d.root for d in dirs), plugin_names + tuple(d.name for d in dirs)
     plugins = bool(tar_roots)
     pi_extras = pi_plugins(dirs, settings.pi_flavour) if harness == "pi" else None
-    install = codex_install(dirs) if harness == "codex" and dirs else pi_extras.install if pi_extras else None
+    install = (codex_install(dirs) if harness == "codex" and dirs else devin_install(dirs) if harness == "devin" and dirs
+               else pi_extras.install if pi_extras else None)
     comms = settings.comms and comms_wired(harness, settings.pi_flavour)
-    automatic = not settings.comms_pull  # AOS_OPENSHELL_COMMS=pull: no hooks, no aos extension, no finalization hold
+    automatic = not settings.comms_pull  # Pull retains lifecycle wiring, without automatic delivery/finalization.
     source = os.path.join(settings.repo_root, task["repo"])
     if not os.path.isdir(os.path.join(source, ".git")) and not os.path.isdir(source):
         return refuse(f"{source} is not a repository")
@@ -2380,14 +2990,15 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
         return 1
     plan: PiPlan | None = None
     invocation: pi.Invocation | None = None
+    devin_key: str | None = None
     session_id = str(uuid.uuid4()) if harness == "pi" and pi.FLAVOURS[settings.pi_flavour].session_id_flag else None
     pg: openshell_services.Plan | None = None
     decl: evidence.Declaration | None = None
     verify_on = False
-    fresh = settings.fresh_acceptance or harness == "pi"
+    fresh = settings.fresh_acceptance or harness in ("pi", "devin") or interactive
     repo_workflow: workflow.Workflow | None = None
-    codex_config = False
-    codex_notes: tuple[str, ...] = ()
+    config_off = False
+    config_notes: tuple[str, ...] = ()
     branch = f"ao/{task_id}"
     try:
         if harness == "pi":
@@ -2395,6 +3006,8 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
             invocation = pi_invocation(plan.flavour, plan.bin, plan.provider, plan.model, session_id,
                                        settings.harness_timeout, pi_extras, comms=comms, automatic=automatic,
                                        interactive=interactive)
+        if harness == "devin":
+            devin_key = devin_admission(settings)
         default = policy.resolve_default(source)
         repo_policy = read_policy_v2(source, default)
         tip = continuation_tip(source, branch, default.sha)
@@ -2404,13 +3017,19 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
                 raise AdapterError(f"base {base_commit[:12]} is not in the source repository")
         start_sha = tip or base_commit or default.sha
         repo_workflow = workflow.read_workflow(source, default)
+        locked = workflow.locked_patterns(repo_workflow.protected if repo_workflow is not None else ())
+        # Verification gates U3: the repository can ask for the before-run itself; it runs in a fresh sandbox, so a
+        # worker that runs acceptance in the job sandbox skips it with a note.
+        repo_baseline = repo_workflow is not None and repo_workflow.baseline
+        baseline_on = settings.baseline or (repo_baseline and fresh)
         snapshot = workflow.execution_snapshot(task, repo_workflow, default)
         commands = workflow.run_acceptance(snapshot)
         effective_task = {**task, "acceptance": commands}
         linger = settings.harness_timeout + settings.accept_timeout * len(commands) + LINGER_MARGIN
-        codex_notes = codex_config_notes(source, default) if comms and harness == "codex" else ()
-        codex_config = bool(codex_notes)
-        comms = comms and not codex_config
+        config_notes = (codex_config_notes(source, default) if comms and harness == "codex"
+                        else devin_config_notes(source, start_sha) if comms and harness == "devin" else ())
+        config_off = bool(config_notes)
+        comms = comms and not config_off
         try:
             decl = evidence.load_declaration(source)
         except ValueError as exc:
@@ -2422,16 +3041,20 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
             raise AdapterError(str(exc)) from None
         prompt_text = None
         if interactive:
-            prompt_text = build_prompt(effective_task, verify_skill=verify_on,
-                                       evidence=evidence.prompt_line(decl) if decl is not None else None, comms=comms,
-                                       harness=settings.pi_flavour, repository_instructions=repo_workflow.prompt if repo_workflow else None,
-                                       previous=previous_run, continuing=tip is not None, interactive=True)
+            prompt_harness = settings.pi_flavour if harness == "pi" else harness
+            prompt_text = build_prompt(
+                effective_task, verify_skill=verify_on,
+                evidence=evidence.prompt_line(decl) if decl is not None else None, comms=comms,
+                harness=prompt_harness,
+                repository_instructions=repo_workflow.prompt if repo_workflow else None,
+                previous=previous_run, continuing=tip is not None, interactive=True, locked=locked)
             prompt_bytes = len(prompt_text.encode())
             if prompt_bytes > PROMPT_ARGV_MAX:
                 raise AdapterError(PROMPT_TOO_LONG.format(n=prompt_bytes))
         rendered = render_for(settings, repo_policy, harness, pty=interactive)
         accept_rendered = render_acceptance(settings, repo_policy) if fresh else None
-        model = plan.model if plan else settings.claude_model if harness == "claude" else settings.pi_model
+        model = (plan.model if plan else settings.claude_model if harness == "claude"
+                 else settings.devin_model if harness == "devin" else settings.pi_model)
         script = main_script(harness, model, session_id,
                              flavour=settings.pi_flavour, bin=settings.pi_bin, provider=plan.provider if plan else None,
                              harness_timeout=settings.harness_timeout, linger=linger, comms=comms,
@@ -2442,11 +3065,17 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
         return refuse(str(exc))
     auth = plan.auth if plan else None
     notes: list[str] = []
+    ready_hook: InteractiveReadyHook | None = None
     notes.append(f"acceptance: {snapshot['acceptance_source']}")
+    if snapshot.get("required_checks"):
+        notes.append("required checks before accept or merge: " + ", ".join(snapshot["required_checks"]))
     if repo_workflow is not None:
         notes.append(f"workflow {repo_workflow.ref} sha256 {repo_workflow.sha}")
-    if codex_config:
-        notes.extend(codex_notes)
+    if repo_baseline and not fresh:
+        notes.append("baseline skipped: aos-workflow.toml asks for it, but this run's acceptance is not in a fresh "
+                     "sandbox (AOS_OPENSHELL_FRESH_ACCEPTANCE=0)")
+    if config_off:
+        notes.extend(config_notes)
     if roots:
         notes.append("plugins: " + ", ".join(f"{name}@{plugin_version(root)}" for name, root in zip(plugin_names, roots)))
     elif dirs:
@@ -2454,7 +3083,7 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
         if pi_extras is not None and pi_extras.unloaded:
             notes.append("plugins: agents not loaded on pi (no subagent mechanism works on pi 1.1.0, Pi mechanisms "
                          "finding 5): " + ", ".join(pi_extras.unloaded))
-    elif settings.claude_plugins or settings.codex_plugins or settings.pi_plugins:
+    elif settings.claude_plugins or settings.codex_plugins or settings.pi_plugins or settings.devin_plugins:
         key = PLUGIN_KEYS.get(harness)
         notes.append(f"plugins: none for {harness} ({key} unset)" if key
                      else f"plugins: none for {harness} (no plugin setting for {harness})")
@@ -2481,7 +3110,9 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
         return 1
     run = claim.json()
     run_id, token = run["id"], run["claim_token"]
-    secret = token if comms else None  # S7: with comms on the token reaches neither the bus nor the runner's output
+    # S7: with comms on the token reaches neither the bus nor the runner's output; a Devin run treats its key the same way,
+    # so a comms-on Devin run has both
+    secret = (token, devin_key) if comms and devin_key else token if comms else devin_key
     print(f"claimed {run_id}", file=out)
     lock = threading.Lock()
     heartbeat: Heartbeat | None = None
@@ -2491,10 +3122,13 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
     attempted: list[str] = []
     cleanup_failed = False
     collected = False
+    receiver_closed = False
     database: openshell_services.Database | None = None
     database_owned = False  # the services.json marker is on disk: the container may exist
     observed: str | None = None
     baseline_codes: list[int | None] | None = None
+    baseline_outcomes: dict[str, str] | None = None  # U3: test outcomes before the agent, from JUnit XML
+    test_changes: list[dict[str, str]] | None = None  # U3: tests that passed before and not after, posted on review
     evidence_summary: dict[str, Any] | None = None
     final_text: str | None = None
     submission: dict[str, Any] | None = None
@@ -2513,18 +3147,28 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
     def collect(returncode: int | None) -> pi.PiResult:
         nonlocal collected, observed
         collected = True
-        assert plan is not None and invocation is not None and state is not None and name is not None
+        assert state is not None and name is not None
         if interactive:
+            output = _HarnessOutput()
             observed, events, diagnostics = collect_interactive(
                 name, plan, state, run_id, secret, database,
-                submission=submission["commit"] if submission is not None else None)
-            result = pi.PiResult(None, observed, None, None, True)
+                submission=submission["commit"] if submission is not None else None,
+                cap_mib=settings.harness_output_cap_mib, output=output)
+            # Interactive evidence is best effort; only output limits change the submitted outcome.
+            error = (output.error(settings.harness_output_cap_mib, returncode)
+                     if output.oversized or output.long_line else None)
+            result = pi.PiResult(None, observed, error, None, True)
+            flavour = plan.flavour if plan else "claude"
+            requested = session_id if plan else None
+            critical["session"] = [f"{flavour} session {observed or 'not observed'} (requested {requested}); "
+                                   f"events {events or 'not retained'}; diagnostics {diagnostics}"]
         else:
+            assert plan is not None and invocation is not None
             result, events, diagnostics = collect_pi(name, plan, invocation, returncode, state, run_id, session_id, secret,
-                                                     database=database)
+                                                     database=database, cap_mib=settings.harness_output_cap_mib)
             observed = result.session_id
-        critical["session"] = [f"{plan.flavour} session {observed or 'not observed'} (requested {session_id}); "
-                               f"events {events or 'not retained'}; diagnostics {diagnostics}"]
+            critical["session"] = [f"{plan.flavour} session {observed or 'not observed'} (requested {session_id}); "
+                                   f"events {events or 'not retained'}; diagnostics {diagnostics}"]
         return result
 
     def capture(tree: str, *, timed_out: bool = False, results: list[dict[str, Any]] | None = None) -> None:
@@ -2583,7 +3227,7 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
         # Lane F (G3): the agent commits as the host's user (operator, 2026-10-14); the values never reach a note.
         notes.append("git identity: AOS_GIT_NAME and AOS_GIT_EMAIL" if settings.git_identity else
                      "git identity: the host's user.name and user.email")
-        if settings.baseline and commands:
+        if baseline_on and commands:
             pre = f"{name}-pre"
             pre_env = state / "services.env"
             try:
@@ -2591,12 +3235,13 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
                 attempted.append(pre)
                 if database is not None:
                     _write_private(pre_env, database.env_file_text().encode())
-                baseline_codes = baseline_fresh(settings, pre, str(accept_policy), accept_rendered, tarball, commands,
-                                                stop=heartbeat.foreign,
-                                                env_file=str(pre_env) if database is not None else None)
+                baseline_codes, baseline_outcomes, result_notes = baseline_fresh(
+                    settings, pre, str(accept_policy), accept_rendered, tarball, commands, stop=heartbeat.foreign,
+                    env_file=str(pre_env) if database is not None else None)
                 notes.append("baseline before the agent: " + "; ".join(
                     f"{command}: exit {rc}" if rc is not None else f"{command}: not run"
                     for command, rc in zip(commands, baseline_codes)))
+                notes.extend(f"{line} (before the agent)" for line in result_notes)
             except (AdapterError, TimeoutError, subprocess.TimeoutExpired) as exc:
                 if heartbeat.foreign.is_set():
                     raise  # cancelled or lease lost: the run ends here, before the agent sandbox, not as a skip
@@ -2612,6 +3257,13 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
                                      f"{pi.safe_head(hide(str(exc), secret, edges=True), 300, auth)}")
             if database is not None:
                 openshell_services.reset(database, environ)  # the agent starts on an empty database
+            # Verification gates U3: a task whose every command already passes has nothing for the agent to fix, so
+            # the run ends before the agent sandbox, unless the task guards working behaviour on purpose. A
+            # continuation is exempt: a retry may start from work that already passes.
+            if (baseline_codes is not None and all(rc == 0 for rc in baseline_codes) and tip is None
+                    and not task.get("regression_guard")):
+                raise AdapterError(ALREADY_PASSES.format(
+                    detail=f"{len(commands)} command{'s' if len(commands) != 1 else ''} exit 0 on {start_sha[:12]}"))
         provider = [settings.providers[harness]] if harness in settings.providers and harness != "pi" else []
         ensure_free(name, f"{name}-acc")
         attempted.append(name)  # only a create on a confirmed-free name is ours to delete
@@ -2626,8 +3278,6 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
                                                                "session_owner": "runner", "session_agent": harness})
         if start.status_code >= 400:
             raise AdapterError(f"start: {start.status_code} {start.text[:200]}")
-        if interactive:
-            print(f"interactive run {run_id} in sandbox {name}: attach with  aos attach {run_id}  on a host that reaches the gateway", file=out, flush=True)
         _post_progress(client, lock, run_id, token, err, secret=secret, heartbeat=heartbeat, stage="harness")
         wait_for(name, "/sandbox/incoming", 120, interval=2, stop=heartbeat.foreign)
         if interactive:
@@ -2635,9 +3285,10 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
             if not main_pid.isdecimal() or int(main_pid) <= 1:
                 raise AdapterError("interactive: the main script's pid is unreadable")
             main_pid = int(main_pid)
-        check_effective(name, rendered, strict=harness == "pi")
+        check_effective(name, rendered, strict=harness in ("pi", "devin"))
         critical["policy"] = ["effective policy matches the rendering"
-                              + (" (strict: Status Effective, Source sandbox, no extra rules)" if harness == "pi" else "")]
+                              + (" (strict: Status Effective, Source sandbox, no extra rules)"
+                                 if harness in ("pi", "devin") else "")]
         if database is not None:
             env_path = state / "services.env"
             _write_private(env_path, database.env_file_text().encode())
@@ -2652,25 +3303,28 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
             run_file = state / "aos-run.json"
             run_data = {"run_id": run_id, "task_id": task_id, "claim_token": token, "bus_url": bus_url(settings)}
             if interactive:
-                secrets = [auth.access, auth.account_id]
+                secrets = [auth.access, auth.account_id] if auth is not None else [token]
                 if database is not None:
                     secrets += [database.password, quote(database.password, safe="")]
                 run_data.update(execution="interactive",
                                 secrets=sorted({value for value in secrets if len(value) >= pi.MIN_FRAGMENT}, key=len, reverse=True))
+            elif devin_key:  # for the helper to mask what the agent sends: the runner never sees a message go out
+                run_data["headless_secrets"] = [devin_key]
             _write_private(run_file, json.dumps(run_data).encode())
             try:
                 openshell("sandbox", "upload", name, str(run_file), "/sandbox/aos-run.json")
             finally:
                 run_file.unlink(missing_ok=True)
             sandbox_exec(name, "chmod 600 /sandbox/aos-run.json", check=True)
-            check_comms_readiness(name, run_id=run_id, extension=plan is not None and automatic,
+            check_comms_readiness(name, run_id=run_id, extension=plan is not None,
                                   interactive=interactive)
         prompt = state / "prompt.txt"
         prompt.write_text(prompt_text if interactive else build_prompt(effective_task, verify_skill=verify_on,
                                        evidence=evidence.prompt_line(decl) if decl is not None else None, comms=comms,
                                        harness=settings.pi_flavour if harness == "pi" else harness,
                                        repository_instructions=repo_workflow.prompt if repo_workflow is not None else None,
-                                       previous=previous_run, continuing=tip is not None, automatic=automatic))
+                                       previous=previous_run, continuing=tip is not None, automatic=automatic,
+                                       locked=locked))
         settings_file = state / "claude-settings.json"
         settings_file.write_text(json.dumps(claude_settings(comms and harness == "claude", bool(roots), automatic), indent=2))
         openshell("sandbox", "upload", name, str(prompt), "/sandbox/prompt.txt")
@@ -2709,6 +3363,21 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
             openshell("sandbox", "upload", name, str(codex_auth), "/sandbox/codex-home/auth.json")
             sandbox_exec(name, "chmod 600 /sandbox/codex-home/auth.json", check=True)
             codex_auth.unlink()
+        if harness == "devin":
+            devin_config_file = state / "devin-config.json"  # holds no secret: stays in the state directory
+            devin_config_file.write_text(json.dumps(devin_config(comms, automatic), indent=2))
+            openshell("sandbox", "upload", name, str(devin_config_file), f"{DEVIN_USER_DIR}/config.json")
+            if comms:
+                mcp_file = state / "devin-mcp.json"  # holds no secret, like the config file
+                mcp_file.write_text(json.dumps(DEVIN_MCP_CONFIG, indent=2))
+                openshell("sandbox", "upload", name, str(mcp_file), f"{DEVIN_USER_DIR}/mcp_config.json")
+            devin_credentials = state / "devin-credentials.toml"
+            try:
+                _write_private(devin_credentials, Path(settings.devin_auth).read_bytes())
+                openshell("sandbox", "upload", name, str(devin_credentials), DEVIN_CREDENTIALS)
+            finally:
+                devin_credentials.unlink(missing_ok=True)
+            sandbox_exec(name, f"chmod 600 {DEVIN_CREDENTIALS}", check=True)
         if plan is not None and invocation is not None:
             version, warnings = sandbox_capabilities(name, plan, invocation, interactive=interactive)
             notes.append(f"{plan.flavour} {version or 'version unknown'} ({plan.bin}) has every required flag")
@@ -2724,7 +3393,15 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
                 pi.ensure_validity(plan.auth, settings.harness_timeout + 300)
             except pi.AuthError as exc:
                 raise AdapterError(f"Pi auth: {exc}") from None
+        if interactive and harness == "claude":
+            claude_version = check_claude_interactive_capabilities(name)
+            notes.append(f"Claude Code {claude_version} provides interactive, MCP and tmux capabilities")
         upload_job(name, tarball)
+        if interactive and wait_for_interactive_ready(name, heartbeat.foreign):
+            print(f"interactive run {run_id} in sandbox {name}: attach with  aos attach {run_id}  on a host that reaches the gateway", file=out, flush=True)
+            if settings.interactive_ready_hook:
+                ready_hook = InteractiveReadyHook(settings.interactive_ready_hook, task_id=task_id, run_id=run_id,
+                                                  sandbox=name, harness=harness)
 
         def record_entry(kind, entry, state, *, ref=None, reason=None):
             body = {"state": state}
@@ -2848,7 +3525,11 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
                 elapsed = wait_for(name, "/sandbox/harness.rc", settings.harness_timeout, stop=heartbeat.foreign)
         except TimeoutError:
             status, error = "failed", f"harness timeout after {settings.harness_timeout} s"
+            receiver_closed = _close_receiver(client, lock, run_id, token, err, reason="timeout")
         else:
+            receiver_closed = _close_receiver(client, lock, run_id, token, err, reason="native_end")
+            if not receiver_closed:
+                raise AdapterError("receiver closure unconfirmed; acceptance refused")
             if interactive:
                 notes.append(f"interactive session ended ({outcome})")
                 final_text = submission["report"] if submission is not None else None
@@ -2871,13 +3552,14 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
                                              env=(("AOS_CENSUS_MAIN", str(main_pid)), ("AOS_CENSUS_LINGER", str(linger))), timeout=30)
                 if census.returncode != 0 or census.stdout not in (CENSUS_OK, CENSUS_OK + "\n"):
                     raise AdapterError(f"quiescence not established: exit {census.returncode}; {(census.stdout + census.stderr).strip()[:300]}")
-                collect(None)
                 rc = sandbox_exec_direct(name, ["/bin/cat", "/sandbox/harness.rc"], timeout=30).stdout.strip()
-                pi_result = pi.PiResult(final_text, observed, NO_SUBMISSION if submission is None else None, None, True)
+                collected_result = collect(int(rc) if rc.lstrip("-").isdecimal() else None)
+                pi_result = pi.PiResult(final_text, observed,
+                                        NO_SUBMISSION if submission is None else collected_result.error, None, True)
                 if submission is not None:
                     sha = submission["commit"]
                     notes.append(f"submitted {sha[:12]} with {len(submission.get('children') or [])} child result(s)")
-                    notes.append(f"omp submission report:\n{pi.safe_tail(submission['report'], pi.TEXT_TAIL, auth)}")
+                    notes.append(f"interactive submission report:\n{pi.safe_tail(submission['report'], pi.TEXT_TAIL, auth)}")
             else:
                 rc = sandbox_exec_direct(name, ["/bin/cat", "/sandbox/harness.rc"], timeout=30).stdout.strip()
                 notes.append(f"harness {harness} exited {rc} after {elapsed:.0f} s")
@@ -2894,6 +3576,8 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
                     if final_text is not None:
                         final_note = pi.safe_tail(hide(final_text, secret), pi.TEXT_TAIL, auth)
                         notes.append(f"{harness} final message:\n{final_note}")
+                    elif harness == "devin" and rc == "0":
+                        notes.append(DEVIN_NO_MESSAGE)
                 if pi_result is not None and pi_result.text is not None:
                     notes.append(f"{plan.flavour} final message:\n{pi.safe_tail(pi_result.text, pi.TEXT_TAIL, auth)}")
                 # Lane F (G5): every harness's own final text is the acceptance-stage report, so a finish notice quotes
@@ -2915,12 +3599,14 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
                     else:
                         notes.append("codex auth.json not read back from the sandbox")
             stderr_reason = ""
-            if rc != "0":
+            if rc != "0" or (harness == "devin" and final_text is None):
                 # U4: a failed harness names its first stderr line and the report keeps a bounded tail,
                 # as the native Codex route did; r1 of AO-4 left only `harness exit 1`.
                 stderr_tail = (hide(pi.safe_tail(sandbox_exec_direct(name, ["/usr/bin/tail", "-c", str(STDERR_TAIL),
                                                                             "/sandbox/harness.err"], timeout=30).stdout,
                                                  STDERR_TAIL, auth), secret, edges=True) or "").strip()
+                if harness == "devin":
+                    stderr_tail = devin_stderr(stderr_tail)
                 if stderr_tail:
                     notes.append("harness stderr:\n" + stderr_tail)
                 stderr_reason = ": " + next((line.strip() for line in stderr_tail.splitlines() if line.strip()), "no stderr")[:300]
@@ -3044,11 +3730,21 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
                                 notes.append("integration order: " + ", ".join(
                                     f"{task_id}@{integrated_at[task_id][:12]}" for task_id in order))
                     critical["result"] = [f"result {result_commit[:12]} on {branch} (bundle {os.path.getsize(bundle)} bytes)"]
+                    critical["changes"] = change_report(source, start_sha, result_commit,
+                                                        repo_workflow.watch if repo_workflow is not None else ())
+                    # Verification gates U1: a result that touched a locked path since the run's start is refused
+                    # here, before any acceptance sandbox is spent, on the same path as the token scan below.
+                    refusal = protected_refusal(source, start_sha, result_commit,
+                                                repo_workflow.protected if repo_workflow is not None else ())
                     # S8: with comms on, a result whose objects carry the claim token (or one the scan cannot read)
                     # is refused before acceptance and any push, and the fetched branch goes back as the cancel
                     # path restores it. The token dies with the run; what this prevents is pushing a secret-shaped
-                    # string.
-                    refusal = scan_result(source, default.sha, result_commit, token) if comms else None
+                    # string. A Devin key does not die with the run, which is why its leak is refused the same way,
+                    # on a comms-on run after the token's scan passed.
+                    if refusal is None and comms:
+                        refusal = scan_result(source, default.sha, result_commit, token)
+                    if refusal is None and devin_key:
+                        refusal = scan_result(source, default.sha, result_commit, devin_key, name="Devin key")
                     if refusal is not None:
                         # The refusal stands whatever the restore does (endpoint lane E9, from 39's review of U3):
                         # restore_branch never raises by contract, and should it anyway, its failure joins the error
@@ -3102,7 +3798,11 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
                                 after = openshell_evidence.exit_codes(f"{name}-acc", len(commands))
                                 lines, summary = baseline_comparison(commands, baseline_codes, after)
                                 notes.extend(lines)
-                                critical["baseline"] = [summary]
+                                after_outcomes, result_notes = openshell_evidence.read_test_outcomes(f"{name}-acc")
+                                notes.extend(f"{line} (after the agent)" for line in result_notes)
+                                compared, test_changes = compare_tests(baseline_outcomes, after_outcomes,
+                                                                       acceptance_passed=passed == len(commands))
+                                critical["baseline"] = [summary, *compared]
                             capture(f"{name}-acc")
                             notes.append(f"acceptance ran in a fresh sandbox {name}-acc under the acceptance policy")
                         else:
@@ -3153,13 +3853,19 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
         notes.append("network: " + ", ".join(f"{k} x{v}" for k, v in sorted(counts.items())))
     except KeyboardInterrupt:
         status, error = "blocked", "runner interrupted"
+        receiver_closed = _close_receiver(client, lock, run_id, token, err, reason="runner_interrupted")
     except Exception as exc:  # noqa: BLE001 -- every failure after claim ends as a blocked result
         status, error = "blocked", pi.safe_head(hide(str(exc) or type(exc).__name__, secret, edges=True), 1000, auth)
+        receiver_closed = _close_receiver(client, lock, run_id, token, err, reason="runner_error")
     finally:
         # From here through the result post and the sandbox deletions a further SIGTERM is ignored,
         # so it cannot skip the post.
         if previous is not None:
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        if not receiver_closed:
+            receiver_closed = _close_receiver(client, lock, run_id, token, err, reason="runner_final")
+            if not receiver_closed:
+                notes.append("receiver closure unconfirmed")
         if plan is not None and name in attempted and not collected:
             try:
                 collect(None)
@@ -3170,6 +3876,8 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
         if heartbeat is not None:
             heartbeat.stop()
             heartbeat.join(timeout=5)
+        if ready_hook is not None:
+            notes.append(ready_hook.finish())
     if fetched and not pushed and heartbeat is not None and heartbeat.foreign.is_set():
         # A cancelled run may restore only the commit its own bundle imported, never a successor's ref.
         assert imported_commit is not None
@@ -3181,7 +3889,7 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
         critical = {key: [database.redact(line) for line in lines] for key, lines in critical.items()}
         if evidence_summary is not None:
             evidence_summary = evidence.map_strings(evidence_summary, database.redact)
-    if secret is not None:  # S7: the claim token of a comms-on run reaches neither the bus nor the runner's output
+    if secret is not None:  # S7: the run's secrets reach neither the bus nor the runner's output
         acceptance_output, error = hide(acceptance_output, secret), hide(error, secret)
         notes = [hide(note, secret) for note in notes]
         critical = {key: [hide(line, secret) for line in lines] for key, lines in critical.items()}
@@ -3191,9 +3899,11 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
     # cleanup failure in AO-4 r2); the deletions follow as the run's own cleanup record and never
     # rewrite the verdict.
     try:
+        if test_changes is not None and database is not None:
+            test_changes = [{**entry, "test": database.redact(entry["test"])} for entry in test_changes]
         rc = _finish(client, lock, run_id, token, harness, status, error, verdict, acceptance_output,
                      result_commit, observed, notes, critical, heartbeat, auth, out, err, evidence_summary,
-                     remote=remote, secret=secret)
+                     remote=remote, secret=secret, test_changes=test_changes if status == "review" else None)
     finally:
         try:
             deletion: list[str] = []
@@ -3233,12 +3943,30 @@ def run_task(client: httpx.Client, *, task_id: str, environ: dict[str, str], out
     return rc
 
 
+def _close_receiver(client: httpx.Client, lock: threading.Lock, run_id: str, token: str,
+                    err: IO[str], *, reason: str) -> bool:
+    """Confirm closed on the authenticated bus before acceptance or cleanup."""
+    try:
+        with lock:
+            response = client.post(f"/runs/{run_id}/receiver",
+                                   json={"claim_token": token, "action": "closed", "reason": reason},
+                                   timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, dict) and data.get("id") == run_id and data.get("receiver_state") == "closed":
+                return True
+    except (httpx.HTTPError, ValueError):
+        pass
+    print("receiver closure unconfirmed by the bus", file=err)
+    return False
+
+
 def _post_progress(client: httpx.Client, lock: threading.Lock, run_id: str, token: str, err: IO[str],
-                   *, database: openshell_services.Database | None = None, secret: str | None = None,
+                   *, database: openshell_services.Database | None = None, secret: Secret = None,
                    heartbeat: Heartbeat | None = None, **fields: Any) -> None:
     """Evidence to the bus as it becomes known (stage, final text, acceptance result), guarded. With the
-    run's database every string value goes through its password redaction first; with comms on (`secret`,
-    the claim token) through the token's redaction after it (S7). With the run's `heartbeat`, a post the bus
+    run's database every string value goes through its password redaction first; with `secret` (see `hide`)
+    through that redaction after it (S7). With the run's `heartbeat`, a post the bus
     refuses with 409 (a cancelled run), or answers with a run status that is no longer live (a swept lease),
     marks the run as ended on the bus there and then, as the heartbeat's own post would (F132)."""
     body: dict[str, Any] = {"claim_token": token}
@@ -3306,7 +4034,7 @@ def ended_on_the_bus(client: httpx.Client, lock: threading.Lock, task_id: str, r
 
 
 def _post_cleanup(client: httpx.Client, lock: threading.Lock, run_id: str, token: str, deletion: list[str],
-                  failed: bool, auth: pi.PiAuth | None, err: IO[str], secret: str | None = None) -> None:
+                  failed: bool, auth: pi.PiAuth | None, err: IO[str], secret: Secret = None) -> None:
     """The cleanup record, posted after the result and guarded: a terminal run on the bus may refuse it."""
     body = {"claim_token": token, "stage": "cleanup", "cleanup_status": "failed" if failed else "complete",
             "cleanup_report": hide(pi.redact("\n".join(deletion) or "no sandbox to delete", auth), secret)}
@@ -3326,11 +4054,11 @@ def _finish(client: httpx.Client, lock: threading.Lock, run_id: str, token: str,
             observed: str | None, notes: list[str], critical: dict[str, list[str]],
             heartbeat: Heartbeat | None, auth: pi.PiAuth | None, out: IO[str], err: IO[str],
             evidence_summary: dict[str, Any] | None = None, remote: str | None = None,
-            secret: str | None = None) -> int:
+            secret: Secret = None, test_changes: list[dict[str, str]] | None = None) -> int:
     """Post the result (SIGTERM is ignored by the caller until this returns). `remote` is the pushed branch's
     public remote URL (Part C) and is posted only when a push succeeded and the URL carries no credential.
-    `secret` is a comms-on run's claim token, hidden from every posted or printed string (S7) and never from
-    the claim_token field."""
+    `secret` is the run's secret or secrets (see `hide`), hidden from every posted or printed string (S7) and never
+    from the claim_token field."""
     if heartbeat is not None and heartbeat.foreign.is_set():
         # The bus already holds a terminal state (cancelled or lease lost); keep the evidence locally.
         print(f"run {heartbeat.foreign_status} on the bus; result not posted", file=err)
@@ -3347,6 +4075,9 @@ def _finish(client: httpx.Client, lock: threading.Lock, run_id: str, token: str,
         body["remote"] = remote
     if evidence_summary is not None:
         body["evidence"] = evidence.map_strings(evidence_summary, lambda text: hide(pi.redact(text, auth), secret))
+    if test_changes:  # U3: only with a review result, and only to a bus that takes the field
+        body["test_changes"] = [{"test": (hide(pi.redact(entry["test"], auth), secret) or "?")[:500],
+                                 "after": entry["after"]} for entry in test_changes]
     delivered = False
     try:
         with lock:

@@ -34,7 +34,7 @@ EVENTS_BYTES_PER_RUN = 8 * 1024 * 1024
 EVENT_MAX_BYTES = 16384
 EVENT_TEXT_CAP = 4000
 PAYLOAD_DEPTH_MAX = 32
-BUS_EVENT_TYPES = ("status", "intent", "submission")
+BUS_EVENT_TYPES = ("status", "intent", "submission", "receiver")
 SUBMISSION_REPORT_MAX = 20000
 SUBMISSION_CHILDREN_MAX = 50
 _PROPOSAL_KEY = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
@@ -43,7 +43,7 @@ _TASK_ID = re.compile(r"^AO-\d+$")
 _RUN_ID = re.compile(r"^AO-\d+-r\d+$")
 _EVENT_AT = re.compile(r"\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d{1,9})?([Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)")
 _EVENT_TYPE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
-HARNESSES = ("claude", "codex", "pi")
+HARNESSES = ("claude", "codex", "pi", "devin")
 EXECUTIONS = ("headless", "interactive")
 ACCEPTANCE_SOURCES = ("task", "workflow.acceptance", "workflow.test_command", "task+workflow.test_command")
 SESSION_OWNERS = ("runner", "hand", "happier")
@@ -58,6 +58,50 @@ CLEANUP_STATUSES = ("complete", "failed")
 RUN_STAGES = ("claimed", "harness", "acceptance", "push", "cleanup")
 
 INTEGRATION_STATUSES = ("passed", "failed", "conflict", "error")
+# Verification gates U2: a required check is a name recorded against a run's exact head before accept or merge.
+CHECK_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
+CHECK_STATUSES = ("passed", "waived")
+CHECK_NOTE_MAX = 2000
+CHECKS_MAX = 20
+MERGE_CHECK = "merge-check"  # computed from the integration record, never recorded
+# Verification gates U3: required while the run lost tests that passed before the agent, until a reason is recorded.
+TEST_CHANGES_CHECK = "test-changes"
+TEST_CHANGE_AFTER = ("missing", "skipped", "failed", "error")
+TEST_CHANGES_MAX = 200
+TEST_NAME_MAX = 500
+
+
+def check_names(value: Any, label: str = "required_checks") -> list[str]:
+    """A list of check names, each [a-z0-9][a-z0-9-]{0,39}, duplicates dropped in order. A list of required checks
+    may not name test-changes, which AOS adds itself; a record (label `name`) may."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError(f"{label} must be a list of strings")
+    names = list(dict.fromkeys(value))
+    for name in names:
+        if not CHECK_NAME.fullmatch(name):
+            raise ValueError(f"{label}: {name!r} is not a check name ([a-z0-9][a-z0-9-]{{0,39}})")
+        if name == TEST_CHANGES_CHECK and label == "required_checks":
+            raise ValueError(f"required_checks: {TEST_CHANGES_CHECK} is added by AOS when tests are lost")
+    if len(names) > CHECKS_MAX:
+        raise ValueError(f"{label}: at most {CHECKS_MAX} names")
+    return names
+
+
+def lost_test_list(value: Any) -> list[dict[str, str]] | None:
+    """A run's lost tests as the runner posts them: [{"test", "after"}], at most TEST_CHANGES_MAX."""
+    if value is None:
+        return None
+    if not isinstance(value, list) or len(value) > TEST_CHANGES_MAX:
+        raise ValueError(f"test_changes must be a list of at most {TEST_CHANGES_MAX} entries")
+    changes = []
+    for entry in value:
+        if (not isinstance(entry, dict) or set(entry) != {"test", "after"} or not isinstance(entry["test"], str)
+                or not entry["test"].strip() or entry["after"] not in TEST_CHANGE_AFTER):
+            raise ValueError("test_changes entries are {test, after} with after one of " + ", ".join(TEST_CHANGE_AFTER))
+        changes.append({"test": _strip_control_chars(entry["test"])[:TEST_NAME_MAX], "after": entry["after"]})
+    return changes
 
 INTERACTION_STATUSES = ("ok", "unparsed", "error")
 INTERACTION_SCENARIO_MAX = 10
@@ -66,9 +110,16 @@ INTERACTION_RAW_MAX = 8000
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
 INTENT_KINDS = ("request", "notice", "scope", "depends_on", "blocker", "assessment")
-DELIVERY_PATHS = ("socket", "daemon-steer", "daemon-start", "queue", "happier", "inbox")
+# Honest receipts (SU3, D1): the separate facts a message's history is made of, in order.
+# `queued` is written by the operator channel (its post was accepted) and later by an owner
+# queue; `included` (provider inclusion) has no producer yet and no route accepts it.
+RECEIPT_STAGES = ("stored", "queued", "prepared", "included", "acknowledged", "answered", "undelivered")
+# What a helper may report about a row it holds, and where it put it (D3, SU4 D1).
+REPORTABLE_STAGES = ("queued", "prepared")
+RECEIPT_SOURCES = ("inbox_tool", "wait_tool", "inbox_wait_tool", "hook", "owner_queue", "cli")
+# The one explicit acknowledgement interface besides an answer (D5a): the host-side CLI.
+ACK_SOURCES = ("cli",)
 INTENT_BODY_MAX = 8000
-INTENT_ATTEMPTS = 3
 # Agents that talk (2026-10-14, D1): the reserved receiver and sender. Not a task, so it
 # can never collide with an `AO-<n>` id; its rows carry run_id NULL and ids `operator-i<n>`.
 OPERATOR = "operator"
@@ -96,14 +147,6 @@ SCOPE_KINDS = ("symbol", "api", "schema", "config", "infra", "test", "migration"
 SCOPE_OPERATIONS = ("add", "extend", "modify", "replace", "remove", "rename", "migrate")
 ASSESSMENT_KINDS = ("conflicts", "compatible", "duplicate", "depends_on")
 _HIGH_OPS = frozenset({"replace", "remove", "rename", "migrate"})
-INTENT_ALLOWED = {
-    "stored": {"stored", "delivered", "acknowledged", "undeliverable", "expired"},
-    "delivered": {"delivered", "acknowledged", "answered", "undeliverable", "expired"},
-    "acknowledged": {"answered"},
-    "answered": set(),
-    "undeliverable": set(),
-    "expired": set(),
-}
 
 
 def utcnow() -> str:
@@ -263,6 +306,30 @@ def frame_notice(row: dict[str, Any]) -> str:
     )
 
 
+def format_receipts(receipts: list[dict[str, Any]]) -> str:
+    """A message's receipt facts in stage order (SU3 D10): `stage@at/actor:source`, `×n` when
+    the same fact was reported again, `[legacy]` when it was migrated from pre-receipt columns,
+    `absent` for a fact nobody recorded. Shared by the CLI, the operator channel and the
+    generated review material so no consumer can show one evidence picture and another a
+    different one."""
+    by_stage = {receipt.get("stage"): receipt for receipt in receipts}
+    parts = []
+    for stage in RECEIPT_STAGES:
+        receipt = by_stage.get(stage)
+        if receipt is None:
+            parts.append(f"{stage}=absent")
+            continue
+        text = f"{stage}@{receipt.get('at')}/{receipt.get('actor')}:{receipt.get('source')}"
+        if (receipt.get("count") or 1) > 1:
+            text += f"×{receipt['count']}"
+        if receipt.get("reason"):
+            text += f"({receipt['reason']})"
+        if receipt.get("actor") == "legacy":
+            text += " [legacy]"
+        parts.append(text)
+    return " ".join(parts)
+
+
 def _check_intent_body(body: str, *, required: bool = True) -> None:
     """The `request` kind's own body check -- unchanged by the parallel repairs
     (B1): no control-character or length-2000 bound, only the frame-tag refusal
@@ -417,11 +484,16 @@ def _task_number(task_id: str) -> int:
 
 
 def _spec_hash(repo: str, brief: str, acceptance: list[str], constraints: str, tier: int, host: str,
-               execution: str = "headless") -> str:
+               execution: str = "headless", required_checks: list[str] | None = None,
+               regression_guard: bool = False) -> str:
     spec = {"repo": repo, "brief": brief, "acceptance": acceptance, "constraints": constraints,
             "tier": tier, "host": host}
     if execution != "headless":
         spec["execution"] = execution
+    if required_checks:  # only when non-empty, so every existing task's hash stays valid
+        spec["required_checks"] = list(required_checks)
+    if regression_guard:  # likewise only when set (U3)
+        spec["regression_guard"] = True
     payload = json.dumps(
         spec,
         sort_keys=True, separators=(",", ":"), ensure_ascii=False,
@@ -437,6 +509,12 @@ class Store:
         self.runs_path = self.data_dir / "runs.jsonl"
         with self.connection() as db:
             db.execute("PRAGMA journal_mode=WAL")
+            # SU3 D9: a database written before receipts existed is recognised before the
+            # script creates the table; its old evidence columns become legacy receipts below.
+            migrate_receipts = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='intent_receipts'").fetchone() is None
+            has_intents = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_intents'").fetchone() is not None
             # An older bus's `items` table (the approval items of lanes retired in
             # AO-14) stays in its database untouched; nothing reads it any more.
             db.executescript("""
@@ -467,6 +545,12 @@ class Store:
                     acked_at TEXT, answered_at TEXT, created_at TEXT,
                     delivery_attempts INTEGER DEFAULT 0, notified_at TEXT
                 );
+                CREATE TABLE IF NOT EXISTS intent_receipts (
+                    intent_id TEXT NOT NULL, stage TEXT NOT NULL, actor TEXT NOT NULL,
+                    source TEXT, run_id TEXT, at TEXT NOT NULL, last_at TEXT NOT NULL,
+                    count INTEGER NOT NULL DEFAULT 1, reason TEXT,
+                    PRIMARY KEY (intent_id, stage)
+                );
                 CREATE TABLE IF NOT EXISTS integration_checks (
                     id TEXT PRIMARY KEY, task_id TEXT, run_id TEXT, head_sha TEXT, base_branch TEXT,
                     base_sha TEXT, status TEXT, output TEXT, worker TEXT, created_at TEXT
@@ -486,7 +570,15 @@ class Store:
                     at TEXT NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL,
                     bytes INTEGER NOT NULL, PRIMARY KEY (run_id, seq)
                 );
+                CREATE TABLE IF NOT EXISTS run_checks (
+                    run_id TEXT NOT NULL, name TEXT NOT NULL, commit_sha TEXT NOT NULL,
+                    status TEXT NOT NULL, note TEXT NOT NULL, created_at TEXT NOT NULL,
+                    PRIMARY KEY (run_id, name)
+                );
             """)
+            db.execute("BEGIN IMMEDIATE")
+            migrate_receiver = "receiver_state" not in {
+                row["name"] for row in db.execute("PRAGMA table_info(task_runs)")}
             for table, additions in {
                 "lanes": {"error_since": "TEXT", "error_notified_at": "TEXT"},
                 "task_runs": {
@@ -502,6 +594,11 @@ class Store:
                     "workflow_commit": "TEXT", "workflow_ref": "TEXT", "workflow_sha": "TEXT",
                     "execution": "TEXT", "submission": "TEXT",
                     "candidates": "TEXT", "imports": "TEXT",
+                    "required_checks": "TEXT", "test_changes": "TEXT",
+                    "receiver_state": "TEXT NOT NULL DEFAULT 'pending'",
+                    "receiver_owner": "TEXT", "receiver_opened_at": "TEXT",
+                    "receiver_closing_at": "TEXT", "receiver_closed_at": "TEXT",
+                    "receiver_reason": "TEXT",
                 },
                 # auto_ready_proposals (agents that talk, U7): proposals by a run in this repo start
                 # ready instead of waiting in the backlog for the operator.
@@ -512,13 +609,16 @@ class Store:
                 # reviews; its run's job copy also carries that task's ao/ branch. Set at creation only.
                 "tasks": {"source": "TEXT", "external_id": "TEXT", "proposed_by": "TEXT", "reviews": "TEXT",
                           "execution": "TEXT", "proposal_key": "TEXT", "base_commit": "TEXT",
-                          "requeues": "INTEGER NOT NULL DEFAULT 0"},
+                          "requeues": "INTEGER NOT NULL DEFAULT 0", "required_checks": "TEXT",
+                          "regression_guard": "INTEGER"},
                 "task_intents": {
                     "scope_kind": "TEXT", "key": "TEXT", "operation": "TEXT", "assessment": "TEXT",
                     "merge_rule": "TEXT", "about_intent": "TEXT", "retracted_at": "TEXT",
                     # The Telegram notice an operator-targeted row was posted as (U5: a reply
                     # to that message answers the row).
                     "tg_chat_id": "TEXT", "tg_message_id": "INTEGER",
+                    "to_run_id": "TEXT", "admission": "TEXT",
+                    "terminal_at": "TEXT", "terminal_reason": "TEXT",
                 },
             }.items():
                 columns = {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
@@ -541,6 +641,133 @@ class Store:
 
             db.execute("CREATE UNIQUE INDEX IF NOT EXISTS tasks_proposal_key "
                        "ON tasks(proposed_by, proposal_key) WHERE proposal_key IS NOT NULL")
+            db.execute("CREATE INDEX IF NOT EXISTS intents_exact_recipient "
+                       "ON task_intents(to_run_id,admission,terminal_reason)")
+            if migrate_receiver:
+                now_s = utcnow()
+                db.execute("UPDATE task_runs SET receiver_state='closed',receiver_reason='legacy_unqualified',"
+                           "receiver_closing_at=?,receiver_closed_at=?", (now_s, now_s))
+                db.execute("UPDATE task_intents SET admission='legacy' WHERE kind IN ('request','notice')")
+                db.execute("UPDATE task_intents SET terminal_reason='legacy_unbound',terminal_at=? "
+                           "WHERE kind IN ('request','notice') AND to_task_id!=? "
+                           "AND (kind='notice' OR answered_at IS NULL)", (now_s, OPERATOR))
+            if migrate_receipts and has_intents:
+                self._migrate_receipts(db)
+
+    def _migrate_receipts(self, db: sqlite3.Connection) -> None:
+        """SU3 D9, one shot: every request/notice row written before receipts existed gets its
+        facts copied from the old columns with actor `legacy`, so a pre-cutover automatic
+        acknowledgement can never read as the agent's own act; nothing is invented (no
+        `queued`, no `included`), and the summary value `delivered` becomes `prepared`."""
+        db.execute("UPDATE task_intents SET state='prepared' WHERE state='delivered'")
+        rows = db.execute("SELECT * FROM task_intents WHERE kind IN ('request','notice')").fetchall()
+        for row in rows:
+            facts = [("stored", "migration", row["created_at"], 1, None)]
+            if row["delivered_at"] is not None:
+                facts.append(("prepared", row["delivered_via"] or "unknown", row["delivered_at"],
+                              max(row["delivery_attempts"] or 0, 1), None))
+            if row["acked_at"] is not None:
+                facts.append(("acknowledged", "automatic", row["acked_at"], 1, None))
+            if row["answered_at"] is not None:
+                facts.append(("answered", "migration", row["answered_at"], 1, None))
+            if row["terminal_at"] is not None:
+                facts.append(("undelivered", row["terminal_reason"] or "unknown", row["terminal_at"], 1,
+                              row["terminal_reason"]))
+            for stage, source, at, count, reason in facts:
+                if at is None:
+                    continue
+                db.execute(
+                    "INSERT OR IGNORE INTO intent_receipts (intent_id,stage,actor,source,run_id,at,last_at,count,reason) "
+                    "VALUES (?,?,'legacy',?,?,?,?,?,?)",
+                    (row["id"], stage, source, row["to_run_id"], at, at, count, reason))
+
+    @staticmethod
+    def _receipt(db: sqlite3.Connection, intent_id: str, stage: str, *, actor: str, source: str | None,
+                 run_id: str | None, now_s: str, reason: str | None = None) -> None:
+        """One receipt fact (SU3 D1): the first report of a stage keeps its at/actor/source/
+        run_id/reason for good; a repeat only bumps count and last_at."""
+        if stage not in RECEIPT_STAGES:
+            raise ValueError(f"unknown receipt stage {stage!r}")
+        db.execute(
+            "INSERT INTO intent_receipts (intent_id,stage,actor,source,run_id,at,last_at,count,reason) "
+            "VALUES (?,?,?,?,?,?,?,1,?) "
+            "ON CONFLICT(intent_id,stage) DO UPDATE SET last_at=excluded.last_at, count=count+1",
+            (intent_id, stage, actor, source, run_id, now_s, now_s, reason))
+
+    @staticmethod
+    def _receipts(db: sqlite3.Connection, intent_id: str) -> list[dict[str, Any]]:
+        return [dict(row) for row in db.execute(
+            "SELECT * FROM intent_receipts WHERE intent_id=? ORDER BY at, rowid", (intent_id,))]
+
+    def _transition_receiver(self, db: sqlite3.Connection, run_id: str, action: str,
+                             now_s: str, reason: str, owner: str | None = None) -> list[dict[str, Any]]:
+        """Change receiver state and disposition its exact inbox in the caller's transaction."""
+        run = self._get_run_row(db, run_id)
+        state = run["receiver_state"]
+        if owner is not None and run["receiver_owner"] not in (None, owner):
+            raise TransitionError("receiver owner mismatch")
+        if action == "receiving":
+            if (state not in ("pending", "receiving") or run["status"] != "running"
+                    or run["submission"] is not None or run["lease_until"] < now_s):
+                raise TransitionError("receiver cannot open")
+            if state == "receiving":
+                return []
+            db.execute("UPDATE task_runs SET receiver_state='receiving',receiver_owner=?,"
+                       "receiver_opened_at=? WHERE id=?", (owner, now_s, run_id))
+        else:
+            if state == "closed" or state == action:
+                return []
+            db.execute("UPDATE task_runs SET receiver_state=?,receiver_closing_at=COALESCE(receiver_closing_at,?),"
+                       "receiver_closed_at=COALESCE(receiver_closed_at,?),"
+                       "receiver_reason=COALESCE(receiver_reason,?) WHERE id=?",
+                       (action, now_s, now_s if action == "closed" else None, reason, run_id))
+        run = self._get_run_row(db, run_id)
+        payload = {key: run[key] for key in (
+            "task_id", "receiver_state", "receiver_owner", "receiver_opened_at",
+            "receiver_closing_at", "receiver_closed_at", "receiver_reason")}
+        payload.update(run_id=run_id, reason=reason)
+        payload = _scrub(payload, run["claim_token"])
+        self._append_bus_event(db, run_id, "receiver", payload, datetime.fromisoformat(now_s))
+        records = [dict(lane="tasks", started=now_s, ended=now_s, outcome="run:receiver",
+                        receipt={**payload, "event": "run:receiver"}, attempts=0, needs_user=False)]
+        if action != "receiving":
+            rows = db.execute(
+                "SELECT * FROM task_intents WHERE to_run_id=? AND admission='accepted' "
+                "AND terminal_reason IS NULL AND (kind='notice' OR answered_at IS NULL)",
+                (run_id,)).fetchall()
+            for row in rows:
+                db.execute("UPDATE task_intents SET terminal_reason='receiver_closed',terminal_at=?,"
+                           "notified_at=NULL WHERE id=?", (now_s, row["id"]))
+                self._receipt(db, row["id"], "undelivered", actor="bus", source="receiver", run_id=run_id,
+                              now_s=now_s, reason="receiver_closed")
+                updated = db.execute("SELECT * FROM task_intents WHERE id=?", (row["id"],)).fetchone()
+                self._intent_event(db, updated, datetime.fromisoformat(now_s), stage="undelivered")
+                records.append(dict(lane="tasks", started=now_s, ended=now_s, outcome="intent:terminal",
+                                    receipt={"event": "intent:terminal", **{key: updated[key] for key in (
+                                        "id", "task_id", "run_id", "to_task_id", "to_run_id",
+                                        "admission", "terminal_reason", "terminal_at")}},
+                                    attempts=0, needs_user=True))
+        return records
+
+    def update_receiver(self, run_id: str, claim_token: str, *, action: str,
+                        reason: str, owner: str | None = None,
+                        now: datetime | None = None) -> dict[str, Any]:
+        _enum(action, ("receiving", "closing", "closed"), "receiver action")
+        for name, value, bound in (("reason", reason, 200), ("owner", owner, 256)):
+            if value is None and name == "owner" and action != "receiving":
+                continue
+            if not isinstance(value, str) or not value.strip() or len(value) > bound:
+                raise ValueError(f"{name} must be nonblank and at most {bound} characters")
+        now_s = _fmt(now or datetime.now(timezone.utc))
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            run = self._get_run_row(db, run_id)
+            if not self._token_ok(run, claim_token):
+                raise TransitionError("stale claim_token")
+            records = self._transition_receiver(db, run_id, action, now_s, reason, owner)
+            run = self._get_run_row(db, run_id)
+            self._append_runs(records)
+        return self._decode_run(run)
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
@@ -648,6 +875,8 @@ class Store:
         task = dict(row)
         task["execution"] = task.get("execution") or "headless"
         task["acceptance"] = json.loads(task["acceptance"] or "[]")
+        task["required_checks"] = json.loads(task.get("required_checks") or "[]")
+        task["regression_guard"] = bool(task.get("regression_guard"))
         return task
 
     @staticmethod
@@ -657,6 +886,8 @@ class Store:
         run["submission"] = json.loads(run["submission"]) if run.get("submission") else None
         run["candidates"] = json.loads(run["candidates"]) if run.get("candidates") else []
         run["imports"] = json.loads(run["imports"]) if run.get("imports") else []
+        run["required_checks"] = json.loads(run["required_checks"]) if run.get("required_checks") else []
+        run["test_changes"] = json.loads(run["test_changes"]) if run.get("test_changes") else None
         if not keep_token:
             run.pop("claim_token", None)
         run["evidence"] = Store._decode_evidence(run.get("evidence"))
@@ -700,17 +931,18 @@ class Store:
             (claim_token or "").encode("utf-8", "surrogatepass"),
         )
 
-    @staticmethod
-    def _decode_intent(row: sqlite3.Row) -> dict[str, Any]:
+    def _decode_intent(self, db: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
         intent = dict(row)
         if intent["kind"] == "request":
             intent["framed"] = frame_request(intent)
         elif intent["kind"] == "notice":
             intent["framed"] = frame_notice(intent)
+        if intent["kind"] in ("request", "notice"):
+            intent["receipts"] = self._receipts(db, intent["id"])
         return intent
 
     def _decode_intent_with_findings(self, db: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
-        item = self._decode_intent(row)
+        item = self._decode_intent(db, row)
         item["findings"] = [dict(f) for f in db.execute(
             "SELECT * FROM intent_findings WHERE intent_id=? ORDER BY created_at, rowid", (row["id"],))]
         return item
@@ -786,11 +1018,15 @@ class Store:
                     constraints: str = "", tier: int = 1, harness: str = "claude",
                     host: str | None = None, source: str | None = None,
                     external_id: str | None = None, reviews: str | None = None,
-                    execution: str = "headless") -> dict[str, Any]:
+                    execution: str = "headless", required_checks: list[str] | None = None,
+                    regression_guard: bool = False) -> dict[str, Any]:
         repo = normalize_repo(repo)
+        if not isinstance(regression_guard, bool):
+            raise ValueError("regression_guard must be true or false")
         if not (title or "").strip():
             raise ValueError("title is required")
         acceptance = list(acceptance) if acceptance else []
+        required = check_names(required_checks)
         _enum(harness, HARNESSES, "harness")
         _enum(execution, EXECUTIONS, "execution")
         if host is not None:
@@ -809,12 +1045,15 @@ class Store:
             if host is None:
                 repo_row = db.execute("SELECT default_host FROM repos WHERE name=?", (repo,)).fetchone()
                 host = repo_row["default_host"] if repo_row is not None else "any"
-            spec_hash = _spec_hash(repo, brief, acceptance, constraints, tier, host, execution)
+            spec_hash = _spec_hash(repo, brief, acceptance, constraints, tier, host, execution, required,
+                                   regression_guard)
             db.execute("""INSERT INTO tasks
                 (id,repo,title,brief,acceptance,constraints,tier,harness,host,status,spec_hash,
-                 created_at,updated_at,source,external_id,reviews,execution) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 created_at,updated_at,source,external_id,reviews,execution,required_checks,regression_guard)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (task_id, repo, title, brief, json.dumps(acceptance), constraints, tier, harness,
-                 host, "backlog", spec_hash, now, now, source, external_id, reviews, execution))
+                 host, "backlog", spec_hash, now, now, source, external_id, reviews, execution,
+                 json.dumps(required) if required else None, 1 if regression_guard else None))
         return self.get_task(task_id)
 
     def propose_task(self, task_id: str, run_id: str, claim_token: str, *, title: str, brief: str,
@@ -1084,12 +1323,17 @@ class Store:
                 "blocker": blocker, "note": None}
 
     def family(self, task_id: str, *, max_live_per_repo: int, detail: str | None = None,
-               now: datetime | None = None) -> dict[str, Any]:
+               now: datetime | None = None, run_id: str | None = None) -> dict[str, Any]:
         with self.connection() as db:
             db.execute("BEGIN")
             parent = self._get_task_row(db, task_id)
-            row = db.execute("SELECT * FROM task_runs WHERE task_id=? ORDER BY rowid DESC LIMIT 1",
-                             (task_id,)).fetchone()
+            if run_id is None:
+                row = db.execute("SELECT * FROM task_runs WHERE task_id=? ORDER BY rowid DESC LIMIT 1",
+                                 (task_id,)).fetchone()
+            else:
+                row = self._get_run_row(db, run_id)
+                if row["task_id"] != task_id:
+                    raise TransitionError("run is not on this task")
             run = self._decode_run(row) if row is not None else None
             children = db.execute("SELECT * FROM tasks WHERE proposed_by=? ORDER BY CAST(substr(id,4) AS INTEGER)",
                                   (task_id,)).fetchall()
@@ -1116,9 +1360,13 @@ class Store:
                 waiting = ("authorization" if child["status"] == "backlog" else
                            "capacity" if child["status"] == "ready" and live is None else "none")
                 questions = [dict(q, body=q["body"][:200]) for q in db.execute(
-                    "SELECT id,state,created_at,body FROM task_intents WHERE task_id=? AND to_task_id=? "
-                    "AND kind='request' AND state IN ('stored','delivered','acknowledged') ORDER BY created_at,rowid",
-                    (child["id"], task_id))]
+                    "SELECT id,state,created_at,body,run_id,to_run_id,admission,terminal_reason,terminal_at "
+                    "FROM task_intents WHERE task_id=? AND to_run_id=? AND admission='accepted' "
+                    "AND terminal_reason IS NULL AND kind='request' "
+                    "AND state IN ('stored','prepared','acknowledged') ORDER BY created_at,rowid",
+                    (child["id"], run["id"] if run is not None else None))]
+                for question in questions:
+                    question["receipts"] = self._receipts(db, question["id"])
                 notices = db.execute(
                     "SELECT COUNT(*) FROM task_intents WHERE task_id=? AND to_task_id=? AND kind='notice'",
                     (child["id"], task_id)).fetchone()[0]
@@ -1144,7 +1392,8 @@ class Store:
                                           now=now) if run is not None else None,
                 "children": listed}
 
-    def _cascade(self, db: sqlite3.Connection, parent_id: str, mode: str, now_s: str) -> list[str]:
+    def _cascade(self, db: sqlite3.Connection, parent_id: str, mode: str, now_s: str,
+                 records: list[dict[str, Any]]) -> list[str]:
         """Move descendants in depth-first order. Callers append their records after commit."""
         moved = []
 
@@ -1170,6 +1419,8 @@ class Store:
                                (now_s, row["id"], *RUN_LIVE))
                     for run in live_runs:
                         self._run_status_event(db, run["id"], "cancelled", None, datetime.fromisoformat(now_s))
+                        records.extend(self._transition_receiver(
+                            db, run["id"], "closed", now_s, "cancelled"))
                 moved.append(row["id"])
 
         visit(parent_id)
@@ -1195,6 +1446,7 @@ class Store:
                 "SELECT * FROM task_runs WHERE task_id=? ORDER BY rowid DESC", (task_id,))]
         for run in runs:
             run["integration"] = self.latest_integration(run["id"])
+            run["checks"] = self.check_states(run)
         task = self._decode_task(row)
         task["runs"] = runs
         return task
@@ -1258,7 +1510,8 @@ class Store:
                 raise TransitionError("edit would break the ready gate")
             spec_hash = _spec_hash(merged["repo"], merged["brief"], acceptance_list,
                                    merged["constraints"], merged["tier"], merged["host"],
-                                   merged.get("execution") or "headless")
+                                   merged.get("execution") or "headless",
+                                   json.loads(row["required_checks"] or "[]"), bool(row["regression_guard"]))
             db.execute("""UPDATE tasks SET repo=?,title=?,brief=?,acceptance=?,constraints=?,tier=?,
                           harness=?,host=?,execution=?,spec_hash=?,updated_at=? WHERE id=?""",
                        (merged["repo"], merged["title"], merged["brief"], json.dumps(acceptance_list),
@@ -1317,6 +1570,7 @@ class Store:
 
     def cancel_task(self, task_id: str) -> dict[str, Any]:
         now = utcnow()
+        records = []
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             row = self._get_task_row(db, task_id)
@@ -1327,8 +1581,9 @@ class Store:
                        (now, task_id, *RUN_LIVE))
             for run in live_runs:
                 self._run_status_event(db, run["id"], "cancelled", None, datetime.fromisoformat(now))
-            moved = self._cascade(db, task_id, "cancel", now)
-        self._append_runs(self._cascade_records(moved, task_id, "cancel", now))
+                records.extend(self._transition_receiver(db, run["id"], "closed", now, "cancelled"))
+            moved = self._cascade(db, task_id, "cancel", now, records)
+        self._append_runs([*records, *self._cascade_records(moved, task_id, "cancel", now)])
         return {**self.get_task(task_id), "cascade": moved}
 
     def complete_task(self, task_id: str, *, merge_commit: str | None = None,
@@ -1351,6 +1606,12 @@ class Store:
                     "task has a PR step on; merge the PR once it opens (the sweep keeps retrying)")
             if run["spec_hash"] != row["spec_hash"]:
                 raise TransitionError("spec has changed since the run was claimed")
+            # Verification gates U2: a merge GitHub already reported cannot be undone, so only a local accept
+            # (no merge commit) is refused for a required check that is not on record for the run's head.
+            if merge_commit is None:
+                missing = self._missing_checks(db, run)
+                if missing:
+                    raise TransitionError(f"required checks missing: {', '.join(missing)}")
             db.execute("UPDATE task_runs SET status='passed',merge_commit=COALESCE(?,merge_commit) WHERE id=?",
                        (merge_commit, run["id"]))
             self._task_move(db, row, "done")
@@ -1384,8 +1645,9 @@ class Store:
                    workflow_sha: str | None = None, harness: str | None = None,
                    confirm_tier3: bool = False, dispatch_key: str | None = None,
                    lease_seconds: int, max_live_per_repo: int = 3,
-                   now: datetime | None = None) -> dict[str, Any]:
+                   now: datetime | None = None, required_checks: list[str] | None = None) -> dict[str, Any]:
         _enum(worker_host, WORKER_HOSTS, "worker_host")
+        offered = check_names(required_checks)
         if not isinstance(expected_spec_hash, str) or not expected_spec_hash.strip():
             raise ValueError("expected_spec_hash is required")
         if (not isinstance(effective_acceptance, list) or not effective_acceptance
@@ -1421,6 +1683,10 @@ class Store:
                         "effective_acceptance must be the explicit task acceptance followed by one workflow command")
             elif task_acceptance:
                 raise TransitionError("explicit task acceptance requires acceptance_source=task")
+            # The runner merges the repository default with the task's own list; the task's names are kept even
+            # when a runner that predates required checks sends none.
+            required = list(dict.fromkeys([*offered, *json.loads(row["required_checks"] or "[]")]))
+            snapshot["required_checks"] = required
             if dispatch_key is not None:
                 existing = db.execute("SELECT * FROM task_runs WHERE dispatch_key=?",
                                       (dispatch_key,)).fetchone()
@@ -1460,11 +1726,12 @@ class Store:
             db.execute("""INSERT INTO task_runs
                 (id,task_id,harness,worker,worker_host,claim_token,lease_until,dispatch_key,spec_hash,
                  status,started_at,stage,effective_acceptance,acceptance_source,
-                 workflow_commit,workflow_ref,workflow_sha,execution) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 workflow_commit,workflow_ref,workflow_sha,execution,required_checks)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (run_id, task_id, chosen_harness, worker, worker_host, claim_token, lease_until,
                  dispatch_key, row["spec_hash"], "claimed", now_s, "claimed",
                  json.dumps(snapshot["effective_acceptance"]), acceptance_source, workflow_commit, workflow_ref,
-                 workflow_sha, row["execution"] or "headless"))
+                 workflow_sha, row["execution"] or "headless", json.dumps(required) if required else None))
             self._task_move(db, row, "claimed", now=now_s)
             run = db.execute("SELECT * FROM task_runs WHERE id=?", (run_id,)).fetchone()
         self._append_run(dict(lane="tasks", started=now_s, ended=now_s, outcome="claim",
@@ -1522,7 +1789,7 @@ class Store:
                               session_agent=COALESCE(?,session_agent) WHERE id=?""",
                            (lease_until, session_owner, session_pid, session_addr, session_agent, run_id))
             run = self._get_run_row(db, run_id)
-            pending = (self._pending_requests(db, run["task_id"], now_s, ack_seconds)
+            pending = (self._pending_requests(db, run["id"], now_s, ack_seconds)
                       if run["status"] in RUN_LIVE else [])
             self._append_runs(records)
         return {**self._decode_run(run), "pending_requests": pending}
@@ -1648,8 +1915,9 @@ class Store:
                 raise TransitionError("a different submission is already recorded for this run")
             record = {"report": report, "commit": commit, "children": [dict(c) for c in children], "at": now_s}
             db.execute("UPDATE task_runs SET submission=? WHERE id=?", (json.dumps(record), run_id))
+            records = self._transition_receiver(db, run_id, "closing", now_s, "submitted")
             self._append_bus_event(db, run_id, "submission", {"commit": commit, "children": len(children)}, now_dt)
-            self._append_runs([dict(lane="tasks", started=now_s, ended=now_s, outcome="run:submitted",
+            self._append_runs([*records, dict(lane="tasks", started=now_s, ended=now_s, outcome="run:submitted",
                                     receipt={"task_id": run["task_id"], "run_id": run_id, "commit": commit,
                                              "children": len(children), "event": "run:submitted"},
                                     attempts=0, needs_user=False)])
@@ -1660,9 +1928,12 @@ class Store:
                    acceptance_output: str | None = None, error: str | None = None,
                    session_id: str | None = None, remote: str | None = None,
                    marks: dict[str, str] | None = None, now: datetime | None = None,
-                   grace_seconds: int = 3600, evidence: str | None = None) -> dict[str, Any]:
+                   grace_seconds: int = 3600, evidence: str | None = None,
+                   test_changes: list[dict[str, str]] | None = None) -> dict[str, Any]:
         if status not in FINISH_RUN_SOURCE:
             raise ValueError(f"invalid finish status: {status!r}")
+        lost = lost_test_list(test_changes)
+        lost_text = json.dumps(lost) if lost else None
         self.expire_task_leases(now=now)
         now_dt = now or datetime.now(timezone.utc)
         now_s = _fmt(now_dt)
@@ -1687,15 +1958,16 @@ class Store:
                     raise EmptyResult("empty report for a review result")
                 db.execute("""UPDATE task_runs SET status=?,report=?,result_commit=?,verdict=?,
                               acceptance_output=?,error=?,session_id=COALESCE(?,session_id),ended_at=?,
-                              remote=?,late_result_at=?,evidence=? WHERE id=?""",
+                              remote=?,late_result_at=?,evidence=?,test_changes=? WHERE id=?""",
                            (status, report, result_commit, verdict, acceptance_output, error,
-                            session_id, now_s, remote, now_s if late else None, evidence_text, run_id))
+                            session_id, now_s, remote, now_s if late else None, evidence_text, lost_text, run_id))
                 self._run_status_event(db, run_id, status, error, now_dt)
+                cascade_records.extend(self._transition_receiver(db, run_id, "closed", now_s, status))
                 if task_row["status"] != status:
                     self._task_move(db, task_row, status, now=now_s)
                 if status in ("failed", "blocked"):
-                    moved = self._cascade(db, run["task_id"], "hold", now_s)
-                    cascade_records = self._cascade_records(moved, run["task_id"], "hold", now_s)
+                    moved = self._cascade(db, run["task_id"], "hold", now_s, cascade_records)
+                    cascade_records.extend(self._cascade_records(moved, run["task_id"], "hold", now_s))
                 for key, value in (marks or {}).items():
                     db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (key, value))
                 notice = self._finish_notice(db, task_row, run, run_id, status, report, result_commit, error, now_s)
@@ -1731,8 +2003,8 @@ class Store:
                        now_s: str) -> dict[str, Any] | None:
         """Agents that talk, U7 S4: a finished proposed task tells its parent through the request
         ledger, one `notice` row (lane F, G1: delivered like a request, never answered or
-        retracted) from the child (task and run) to the parent, state `stored`,
-        written inside the finish transaction whether or not the parent has a live run. The body
+        retracted) from the child (task and run) to the parent's exact receiver. Admission is
+        retained even when unavailable, inside the child's finish transaction. The body
         names the status, the branch and commit when known, and an excerpt: for `review`, of the
         agent's final text that the runner posted as the progress report (lane F, G5: `run_row` is
         read before the result overwrites it), else of the result report; for `failed` and
@@ -1765,17 +2037,22 @@ class Store:
                 lines.append(f"{label}: {excerpt}")
         body = "\n".join(lines)
         intent_id = self._next_intent_id(db, child_id)
+        admission = self._admit_request(db, parent_id, now_s)
         db.execute("""INSERT INTO task_intents
             (id,task_id,run_id,kind,to_task_id,body,reply_to,state,delivered_via,delivered_at,
-             acked_at,answered_at,created_at,delivery_attempts,notified_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (intent_id, child_id, run_id, "notice", parent_id, body, None, "stored",
-             None, None, None, None, now_s, 0, None))
+             acked_at,answered_at,created_at,delivery_attempts,notified_at,
+             to_run_id,admission,terminal_at,terminal_reason)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (intent_id, child_id, run_id, "notice", parent_id, body, None,
+             "stored" if admission["admission"] == "accepted" else "unavailable",
+             None, None, None, None, now_s, 0, None, admission["to_run_id"], admission["admission"],
+             admission["terminal_at"], admission["terminal_reason"]))
+        self._admission_receipts(db, intent_id, admission, now_s)
         self._intent_event(db, db.execute("SELECT * FROM task_intents WHERE id=?", (intent_id,)).fetchone(),
-                           datetime.fromisoformat(now_s))
+                           datetime.fromisoformat(now_s), stage="stored")
         return dict(lane="tasks", started=now_s, ended=now_s, outcome="intent:stored",
                     receipt={"task_id": child_id, "run_id": run_id, "intent_id": intent_id,
-                             "to_task_id": parent_id, "event": "intent:stored", "finish_notice": status},
+                             "to_task_id": parent_id, "event": "intent:stored", "finish_notice": status, **admission},
                     attempts=0, needs_user=False)
 
     def progress_run(self, run_id: str, claim_token: str, *, stage: str | None = None,
@@ -1893,18 +2170,19 @@ class Store:
             payload["truncated"] = True
         self._append_bus_event(db, run_id, "status", payload, now_dt)
 
-    def _intent_event(self, db: sqlite3.Connection, row: sqlite3.Row, now_dt: datetime) -> None:
+    def _intent_event(self, db: sqlite3.Connection, row: sqlite3.Row, now_dt: datetime, *,
+                      stage: str) -> None:
+        # SU3 D3b: `stage` names the receipt fact this mutation wrote; `via` is the first
+        # prepared source or None, never a fabricated path.
         payload = {"intent_id": row["id"], "from": row["task_id"], "to": row["to_task_id"],
-                   "state": row["state"], "kind": row["kind"], "reply_to": row["reply_to"],
+                   "state": row["state"], "stage": stage, "kind": row["kind"], "reply_to": row["reply_to"],
                    "via": row["delivered_via"], "body": row["body"][:EVENT_TEXT_CAP]}
+        payload.update({key: row[key] for key in (
+            "run_id", "to_run_id", "admission", "terminal_reason", "terminal_at")})
         if len(row["body"]) > EVENT_TEXT_CAP:
             payload["truncated"] = True
-        runs = db.execute("SELECT id,claim_token FROM task_runs WHERE task_id IN (?,?) AND status IN (?,?)",
-                          (row["task_id"], row["to_task_id"], *RUN_LIVE)).fetchall()
-        if row["run_id"] is not None:
-            own_run = self._get_run_row(db, row["run_id"])
-            if own_run["claim_token"]:
-                payload["body"] = payload["body"].replace(own_run["claim_token"], "***")
+        runs = db.execute("SELECT id,claim_token FROM task_runs WHERE id=? OR (id=? AND ?='accepted')",
+                          (row["run_id"], row["to_run_id"], row["admission"])).fetchall()
         for run in runs:
             if run["claim_token"]:
                 payload["body"] = payload["body"].replace(run["claim_token"], "***")
@@ -1927,11 +2205,12 @@ class Store:
                 db.execute("UPDATE task_runs SET status='blocked',error=?,ended_at=? WHERE id=?",
                            ("lease expired", now_s, run["id"]))
                 self._run_status_event(db, run["id"], "blocked", LEASE_EXPIRED, now_dt)
+                records.extend(self._transition_receiver(db, run["id"], "closed", now_s, "lease_expired"))
                 task_row = self._get_task_row(db, run["task_id"])
                 self._task_move(db, task_row, "blocked", now=now_s)
                 expired.append((run["id"], run["task_id"]))
                 if db.execute("SELECT 1 FROM tasks WHERE proposed_by=? LIMIT 1", (run["task_id"],)).fetchone():
-                    moved = self._cascade(db, run["task_id"], "hold", now_s)
+                    moved = self._cascade(db, run["task_id"], "hold", now_s, records)
                     records.extend(self._cascade_records(moved, run["task_id"], "hold", now_s))
         self._append_runs(records)
         for run_id, task_id in expired:
@@ -1945,6 +2224,7 @@ class Store:
             row = self._get_run_row(db, run_id)
         run = self._decode_run(row)
         run["integration"] = self.latest_integration(run["id"])
+        run["checks"] = self.check_states(run)
         return run
 
     def annotate_run(self, run_id: str, *, pr_number: int | None = None, pr_url: str | None = None,
@@ -2018,6 +2298,104 @@ class Store:
                 "SELECT * FROM integration_checks WHERE run_id=? ORDER BY rowid DESC LIMIT 1",
                 (run_id,)).fetchone()
         return dict(row) if row is not None else None
+
+    # -- required checks (verification gates U2) ---------------------------
+
+    def record_check(self, task_id: str, name: str, *, commit: str, status: str = "passed",
+                     note: str, now: str | None = None) -> dict[str, Any]:
+        """Record that a required check passed (or was waived) for the task's newest review run, against that run's
+        exact head (`pr_head_sha or result_commit`, as `aos integrate` uses). A second record of the same name
+        replaces the first; runs.jsonl keeps both. `merge-check` is computed, never recorded."""
+        (name,) = check_names([name], "name")
+        if name == MERGE_CHECK:
+            raise ValueError("merge-check is computed from the integration record; run aos integrate")
+        _enum(status, CHECK_STATUSES, "status")
+        if not isinstance(commit, str) or not _SHA40.fullmatch(commit):
+            raise ValueError("commit must be a 40-character lowercase hex sha")
+        note = _strip_control_chars(note if isinstance(note, str) else "").strip()
+        if not note:
+            raise ValueError("note is required: what the check was and where its evidence is")
+        if len(note) > CHECK_NOTE_MAX:
+            raise ValueError(f"note is longer than {CHECK_NOTE_MAX} characters")
+        now = now or utcnow()
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._get_task_row(db, task_id)
+            run = db.execute(
+                "SELECT * FROM task_runs WHERE task_id=? AND status='review' ORDER BY rowid DESC LIMIT 1",
+                (task_id,)).fetchone()
+            if run is None:
+                raise TransitionError("no review run to record a check for")
+            head = run["pr_head_sha"] or run["result_commit"]
+            if commit != head:
+                raise TransitionError(f"commit {commit[:12]} is not the head of {run['id']} "
+                                      f"({head[:12] if head else 'none'})")
+            db.execute("""INSERT INTO run_checks(run_id,name,commit_sha,status,note,created_at) VALUES (?,?,?,?,?,?)
+                          ON CONFLICT(run_id,name) DO UPDATE SET commit_sha=excluded.commit_sha,
+                          status=excluded.status,note=excluded.note,created_at=excluded.created_at""",
+                       (run["id"], name, commit, status, note, now))
+            row = db.execute("SELECT * FROM run_checks WHERE run_id=? AND name=?", (run["id"], name)).fetchone()
+        self.task_event(f"check:{status}", task_id=task_id, run_id=run["id"], name=name, commit=commit, note=note)
+        return dict(row)
+
+    def _check_states(self, db: sqlite3.Connection, run: sqlite3.Row | dict[str, Any]) -> list[dict[str, Any]]:
+        """Each check the run requires, in order, with its state for the run's current head: passed or waived (on
+        record for that head), stale (on record for another commit), or missing."""
+        run = dict(run)
+        required = run["required_checks"]
+        names = json.loads(required) if isinstance(required, str) else list(required or [])
+        lost = run.get("test_changes")
+        lost = json.loads(lost) if isinstance(lost, str) else lost
+        if lost and TEST_CHANGES_CHECK not in names:  # U3: lost tests wait for a recorded reason
+            names.append(TEST_CHANGES_CHECK)
+        if not names:
+            return []
+        head = run.get("pr_head_sha") or run.get("result_commit")
+        records = {row["name"]: dict(row) for row in db.execute(
+            "SELECT * FROM run_checks WHERE run_id=?", (run["id"],))}
+        states = []
+        for name in names:
+            if name == MERGE_CHECK:
+                check = db.execute("SELECT * FROM integration_checks WHERE run_id=? ORDER BY rowid DESC LIMIT 1",
+                                   (run["id"],)).fetchone()
+                if check is None:
+                    state, detail = "missing", "no integration check"
+                elif check["head_sha"] != head:
+                    state, detail = "stale", f"integration {check['id']} is for {check['head_sha'][:12]}"
+                elif check["status"] != "passed":
+                    state, detail = "missing", f"integration {check['id']} {check['status']}"
+                else:
+                    state, detail = "passed", (f"integration {check['id']} onto "
+                                               f"{check['base_branch']}@{(check['base_sha'] or '')[:12]}")
+                states.append({"name": name, "state": state, "detail": detail, "computed": True})
+                continue
+            record = records.get(name)
+            if record is None and name == TEST_CHANGES_CHECK:
+                named = ", ".join(f"{entry['test']} ({entry['after']})" for entry in lost[:5])
+                more = f" and {len(lost) - 5} more" if len(lost) > 5 else ""
+                states.append({"name": name, "state": "missing", "computed": False,
+                               "detail": f"{len(lost)} passed before the agent and not after: {named}{more}"})
+            elif record is None:
+                states.append({"name": name, "state": "missing", "detail": "", "computed": False})
+            elif record["commit_sha"] != head:
+                states.append({"name": name, "state": "stale", "computed": False,
+                               "detail": f"recorded for {record['commit_sha'][:12]}: {record['note']}"})
+            else:
+                states.append({"name": name, "state": record["status"], "detail": record["note"],
+                               "computed": False, "recorded_at": record["created_at"]})
+        return states
+
+    def _missing_checks(self, db: sqlite3.Connection, run: sqlite3.Row | dict[str, Any]) -> list[str]:
+        return [check["name"] for check in self._check_states(db, run) if check["state"] not in CHECK_STATUSES]
+
+    def check_states(self, run: dict[str, Any]) -> list[dict[str, Any]]:
+        with self.connection() as db:
+            return self._check_states(db, run)
+
+    def missing_checks(self, run: dict[str, Any]) -> list[str]:
+        """The names of the run's required checks not on record for its current head; [] when it requires none."""
+        with self.connection() as db:
+            return self._missing_checks(db, run)
 
     # -- interaction reviews (parallel step 4, unit U1) ---------------------
 
@@ -2111,59 +2489,78 @@ class Store:
         raised after this call rolls the UPDATEs back unwritten, and the next
         accepted call or the periodic sweep settles the row again.
         """
-        threshold_s = _ack_threshold(now_s, ack_seconds)
         records: list[dict[str, Any]] = []
-
-        # A row addressed to the operator never matches either rule below: the operator has no
-        # runs that end and nobody attempts its delivery. It stays open until answered; the
-        # asker's `wait` refuses once its own run is no longer live (agents that talk, E).
-        expiring = db.execute(
-            "SELECT * FROM task_intents WHERE state IN ('stored','delivered') AND EXISTS ("
-            "  SELECT 1 FROM task_runs r WHERE r.task_id = task_intents.to_task_id"
-            "  AND r.ended_at IS NOT NULL AND r.ended_at >= COALESCE(task_intents.delivered_at,"
-            "                                                        task_intents.created_at))"
-        ).fetchall()
-        for row in expiring:
-            db.execute("UPDATE task_intents SET state='expired',notified_at=NULL WHERE id=?", (row["id"],))
-            self._intent_event(db, db.execute("SELECT * FROM task_intents WHERE id=?", (row["id"],)).fetchone(),
-                               datetime.fromisoformat(now_s))
-            records.append(dict(lane="tasks", started=now_s, ended=now_s, outcome="intent:expired",
-                                receipt={"task_id": row["task_id"], "run_id": row["run_id"],
-                                         "intent_id": row["id"], "to_task_id": row["to_task_id"],
-                                         "event": "intent:expired"},
-                                attempts=0, needs_user=True))
-
-        undeliverable = db.execute(
-            "SELECT * FROM task_intents WHERE state IN ('stored','delivered') "
-            "AND delivery_attempts >= ? AND delivered_at IS NOT NULL AND delivered_at < ?",
-            (INTENT_ATTEMPTS, threshold_s)).fetchall()
-        for row in undeliverable:
-            db.execute("UPDATE task_intents SET state='undeliverable',notified_at=NULL WHERE id=?",
-                       (row["id"],))
-            self._intent_event(db, db.execute("SELECT * FROM task_intents WHERE id=?", (row["id"],)).fetchone(),
-                               datetime.fromisoformat(now_s))
-            records.append(dict(lane="tasks", started=now_s, ended=now_s, outcome="intent:undeliverable",
-                                receipt={"task_id": row["task_id"], "run_id": row["run_id"],
-                                         "intent_id": row["id"], "to_task_id": row["to_task_id"],
-                                         "event": "intent:undeliverable"},
-                                attempts=0, needs_user=True))
+        for run in db.execute(
+                "SELECT id FROM task_runs WHERE receiver_state IN ('pending','receiving') "
+                "AND status IN (?,?) AND lease_until < ?", (*RUN_LIVE, now_s)).fetchall():
+            records.extend(self._transition_receiver(db, run["id"], "closed", now_s, "lease_expired"))
+        # SU3 D6a: no attempt limit. A row is prepared into its receiver's context once and
+        # leaves the queue; its terminal disposition comes from the receiver's close.
         return records
 
-    def _pending_requests(self, db: sqlite3.Connection, task_id: str, now_s: str,
+    def _pending_requests(self, db: sqlite3.Connection, run_id: str, now_s: str,
                           ack_seconds: int) -> list[dict[str, Any]]:
-        threshold_s = _ack_threshold(now_s, ack_seconds)
+        """Open rows nobody has prepared into this exact run's context yet (SU3 D6a), as a
+        Claude Code user message is shown once at a turn boundary."""
         rows = db.execute(
-            "SELECT * FROM task_intents WHERE to_task_id=? AND kind IN ('request','notice') "
-            "AND state IN ('stored','delivered') ORDER BY created_at, rowid LIMIT 20",
-            (task_id,)).fetchall()
+            "SELECT * FROM task_intents WHERE to_run_id=? AND admission='accepted' "
+            "AND terminal_reason IS NULL AND kind IN ('request','notice') "
+            "AND state='stored' ORDER BY created_at, rowid LIMIT 20",
+            (run_id,)).fetchall()
         pending = []
         for row in rows:
-            item = self._decode_intent(row)
+            item = self._decode_intent(db, row)
             item["attempts"] = row["delivery_attempts"]
-            item["due"] = row["delivery_attempts"] < INTENT_ATTEMPTS and (
-                row["delivered_at"] is None or row["delivered_at"] < threshold_s)
             pending.append(item)
         return pending
+
+    def _admission_receipts(self, db: sqlite3.Connection, intent_id: str, admission: dict[str, Any],
+                            now_s: str) -> None:
+        """The facts an insert creates (SU3 D3): durable storage, and for a row the bus could
+        not admit, its terminal disposition with the admission reason."""
+        self._receipt(db, intent_id, "stored", actor="bus", source="store", run_id=admission["to_run_id"],
+                      now_s=now_s)
+        if admission["admission"] != "accepted":
+            self._receipt(db, intent_id, "undelivered", actor="bus", source="admission",
+                          run_id=admission["to_run_id"], now_s=now_s, reason=admission["terminal_reason"])
+
+    def _admit_request(self, db: sqlite3.Connection, to_task_id: str, now_s: str, *,
+                       original: sqlite3.Row | None = None) -> dict[str, Any]:
+        if to_task_id == OPERATOR:
+            return {"to_run_id": None, "admission": "accepted", "terminal_at": None, "terminal_reason": None}
+        reason = None
+        target = None
+        if original is not None:
+            target_id = original["run_id"]
+            if not target_id or not target_id.strip():
+                target_id = None
+                reason = "original_run_unknown"
+            else:
+                target = db.execute("SELECT * FROM task_runs WHERE id=?", (target_id,)).fetchone()
+                if target is None:
+                    reason = "receiver_missing"
+                elif target["task_id"] != to_task_id:
+                    reason = "recipient_mismatch"
+        else:
+            targets = db.execute("SELECT * FROM task_runs WHERE task_id=? AND status IN (?,?)",
+                                 (to_task_id, *RUN_LIVE)).fetchall()
+            target_id = targets[0]["id"] if len(targets) == 1 else None
+            if not targets:
+                reason = "no_live_receiver"
+            elif len(targets) > 1:
+                reason = "ambiguous_receiver"
+            else:
+                target = targets[0]
+        if reason is None:
+            if target["lease_until"] < now_s:
+                reason = "lease_expired"
+            elif (target["receiver_state"] in ("closing", "closed") or target["submission"] is not None
+                  or target["status"] not in RUN_LIVE):
+                reason = "receiver_closed"
+            elif target["status"] != "running" or target["receiver_state"] != "receiving":
+                reason = "receiver_not_ready"
+        return {"to_run_id": target_id, "admission": "accepted" if reason is None else "unavailable",
+                "terminal_at": None if reason is None else now_s, "terminal_reason": reason}
 
     def _insert_request(self, db: sqlite3.Connection, records: list[dict[str, Any]], now_s: str, *,
                         task_id: str, run_id: str | None, to_task_id: str | None, body: str,
@@ -2174,24 +2571,36 @@ class Store:
         k = db.execute("SELECT COUNT(*) AS n FROM task_intents WHERE task_id=?",
                        (task_id,)).fetchone()["n"] + 1
         intent_id = f"{task_id}-i{k}"
+        admission = self._admit_request(db, to_task_id, now_s, original=original)
         db.execute("""INSERT INTO task_intents
             (id,task_id,run_id,kind,to_task_id,body,reply_to,state,delivered_via,delivered_at,
-             acked_at,answered_at,created_at,delivery_attempts,notified_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (intent_id, task_id, run_id, "request", to_task_id, body, reply_to, "stored",
-             None, None, None, None, now_s, 0, None))
+             acked_at,answered_at,created_at,delivery_attempts,notified_at,
+             to_run_id,admission,terminal_at,terminal_reason)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (intent_id, task_id, run_id, "request", to_task_id, body, reply_to,
+             "stored" if admission["admission"] == "accepted" else "unavailable",
+             None, None, None, None, now_s, 0, None, admission["to_run_id"], admission["admission"],
+             admission["terminal_at"], admission["terminal_reason"]))
+        self._admission_receipts(db, intent_id, admission, now_s)
         self._intent_event(db, db.execute("SELECT * FROM task_intents WHERE id=?", (intent_id,)).fetchone(),
-                           datetime.fromisoformat(now_s))
+                           datetime.fromisoformat(now_s), stage="stored")
         records.append(dict(lane="tasks", started=now_s, ended=now_s, outcome="intent:stored",
                             receipt={"task_id": task_id, "run_id": run_id, "intent_id": intent_id,
-                                     "to_task_id": to_task_id, "event": "intent:stored"},
+                                     "to_task_id": to_task_id, "event": "intent:stored", **admission},
                             attempts=0, needs_user=False))
         if original is not None:
+            # SU3 D3: an answer is the answerer's explicit act, so it is also the explicit
+            # acknowledgement (first one wins); no preparation is invented for it.
             acked_at = original["acked_at"] or now_s
             db.execute("UPDATE task_intents SET state='answered',answered_at=?,acked_at=? WHERE id=?",
                        (now_s, acked_at, original["id"]))
+            actor = "operator" if task_id == OPERATOR else "agent"
+            self._receipt(db, original["id"], "acknowledged", actor=actor, source="reply",
+                          run_id=original["to_run_id"], now_s=now_s)
+            self._receipt(db, original["id"], "answered", actor=actor, source="reply",
+                          run_id=original["to_run_id"], now_s=now_s)
             self._intent_event(db, db.execute("SELECT * FROM task_intents WHERE id=?", (original["id"],)).fetchone(),
-                               datetime.fromisoformat(now_s))
+                               datetime.fromisoformat(now_s), stage="answered")
             records.append(dict(lane="tasks", started=now_s, ended=now_s, outcome="intent:answered",
                                 receipt={"task_id": original["task_id"], "run_id": run_id,
                                          "intent_id": original["id"],
@@ -2232,10 +2641,16 @@ class Store:
                     raise TransitionError("not a request")
                 if original["to_task_id"] != task_id:
                     raise TransitionError("cannot reply to a request addressed to another task")
+                if (original["to_run_id"] != run_id or original["admission"] != "accepted"
+                        or original["terminal_reason"] is not None):
+                    raise TransitionError("request is not open for this exact recipient run")
                 if to_task_id is not None and to_task_id != original["task_id"]:
                     raise ValueError("to_task_id must match the original request's task_id")
                 to_task_id = original["task_id"]
-                if original["state"] not in ("delivered", "acknowledged"):
+                # SU3 D3: an answer is accepted from `stored` too -- a lost best-effort
+                # preparation report must not refuse the answer; the receipts then show
+                # answered without prepared, which is what happened.
+                if original["state"] not in ("stored", "prepared", "acknowledged"):
                     raise TransitionError(f"cannot answer a {original['state']} request")
             else:
                 if not to_task_id:
@@ -2248,7 +2663,8 @@ class Store:
             row = self._insert_request(db, records, now_s, task_id=task_id, run_id=run_id,
                                        to_task_id=to_task_id, body=body, original=original)
             self._append_runs(records)
-        return self._decode_intent(row)
+            result = self._decode_intent(db, row)
+        return result
 
     def create_operator_intent(self, *, to_task_id: str | None = None, body: str, reply_to: str | None = None,
                                ack_seconds: int = 900, now: datetime | None = None) -> dict[str, Any]:
@@ -2275,7 +2691,7 @@ class Store:
                     raise TransitionError("not a request")
                 if original["to_task_id"] != OPERATOR:
                     raise TransitionError("the operator can answer only requests addressed to the operator")
-                if original["state"] not in ("stored", "delivered"):
+                if original["state"] not in ("stored", "prepared"):
                     raise TransitionError(f"cannot answer a {original['state']} request")
                 to_task_id = original["task_id"]
             else:
@@ -2283,11 +2699,16 @@ class Store:
             row = self._insert_request(db, records, now_s, task_id=OPERATOR, run_id=None,
                                        to_task_id=to_task_id, body=body, original=original)
             self._append_runs(records)
-        return self._decode_intent(row)
+            result = self._decode_intent(db, row)
+        return result
 
-    def report_delivery(self, intent_id: str, run_id: str, claim_token: str, via: str, *,
-                        note: str | None = None, ack_seconds: int = 900,
-                        now: datetime | None = None) -> dict[str, Any]:
+    def report_receipt(self, intent_id: str, run_id: str, claim_token: str, stage: str, source: str, *,
+                       note: str | None = None, ack_seconds: int = 900,
+                       now: datetime | None = None) -> dict[str, Any]:
+        """SU3 D3: the exact receiving run's helper reports what it did with a row it holds --
+        `queued` (accepted into a harness queue) or `prepared` (written into the model's
+        context by `source`). Neither is an acknowledgement; `prepared` moves the summary to
+        `prepared` and the row leaves the pending queue. A repeat keeps the first fact."""
         now_dt = now or datetime.now(timezone.utc)
         now_s = _fmt(now_dt)
         with self.connection() as db:
@@ -2304,35 +2725,46 @@ class Store:
                 raise TransitionError("run is not the recipient's run")
             records = self._settle_intents(db, now_s, ack_seconds)
 
-            _enum(via, DELIVERY_PATHS, "via")
+            _enum(stage, REPORTABLE_STAGES, "stage")
+            _enum(source, RECEIPT_SOURCES, "source")
             _refuse_own_token(claim_token, note)
             if note is not None and len(note) > 500:
                 raise ValueError("note exceeds 500 characters")
             row = db.execute("SELECT * FROM task_intents WHERE id=?", (intent_id,)).fetchone()
-            if row["state"] not in ("stored", "delivered"):
-                raise TransitionError(f"cannot deliver a {row['state']} request")
-            if row["delivery_attempts"] >= INTENT_ATTEMPTS:
-                raise TransitionError("attempt limit reached")
-            new_state = row["state"] if via == "inbox" else "delivered"
-            db.execute("""UPDATE task_intents SET delivered_via=?,delivered_at=?,delivery_attempts=?,
-                          state=? WHERE id=?""",
-                       (via, now_s, row["delivery_attempts"] + 1, new_state, intent_id))
-            if new_state != row["state"]:
+            if (row["to_run_id"] != run_id or row["admission"] != "accepted"
+                    or row["terminal_reason"] is not None or run["lease_until"] < now_s):
+                raise TransitionError("request is not open for this exact recipient run")
+            if row["state"] not in ("stored", "prepared"):
+                raise TransitionError(f"cannot report a receipt on a {row['state']} request")
+            self._receipt(db, intent_id, stage, actor="helper", source=source, run_id=run_id, now_s=now_s)
+            first = stage == "prepared" and row["delivered_at"] is None
+            if stage == "prepared":
+                fact = db.execute("SELECT * FROM intent_receipts WHERE intent_id=? AND stage='prepared'",
+                                  (intent_id,)).fetchone()
+                db.execute("""UPDATE task_intents SET delivered_via=?,delivered_at=?,delivery_attempts=?,
+                              state='prepared' WHERE id=?""",
+                           (fact["source"], fact["at"], fact["count"], intent_id))
+            if first:
                 self._intent_event(db, db.execute("SELECT * FROM task_intents WHERE id=?", (intent_id,)).fetchone(),
-                                   now_dt)
-            outcome = "intent:attempt" if via == "inbox" else "intent:delivered"
+                                   now_dt, stage="prepared")
+            outcome = ("intent:queued" if stage == "queued" else
+                       "intent:prepared" if first else "intent:attempt")
             receipt = {"task_id": row["task_id"], "run_id": run_id, "intent_id": intent_id,
-                      "to_task_id": row["to_task_id"], "event": outcome}
+                      "to_task_id": row["to_task_id"], "event": outcome, "source": source}
             if note is not None:
                 receipt["note"] = note
             records.append(dict(lane="tasks", started=now_s, ended=now_s, outcome=outcome,
                                 receipt=receipt, attempts=0, needs_user=False))
             row = db.execute("SELECT * FROM task_intents WHERE id=?", (intent_id,)).fetchone()
             self._append_runs(records)
-        return self._decode_intent(row)
+            result = self._decode_intent(db, row)
+        return result
 
-    def ack_intent(self, intent_id: str, run_id: str, claim_token: str, *,
+    def ack_intent(self, intent_id: str, run_id: str, claim_token: str, *, source: str,
                    ack_seconds: int = 900, now: datetime | None = None) -> dict[str, Any]:
+        """SU3 D3/D5a: the agent's own explicit acknowledgement through `source` (the host CLI).
+        It records what the agent did and nothing about delivery: no preparation is invented
+        for a row nobody prepared. Idempotent on an acknowledged or answered row."""
         now_dt = now or datetime.now(timezone.utc)
         now_s = _fmt(now_dt)
         with self.connection() as db:
@@ -2345,30 +2777,34 @@ class Store:
                 raise KeyError(intent_id)
             if row["kind"] not in ("request", "notice"):
                 raise TransitionError("not a request")
-            if run["status"] not in RUN_LIVE or run["task_id"] != row["to_task_id"]:
+            if run["task_id"] != row["to_task_id"] or row["to_run_id"] != run_id or row["admission"] != "accepted":
                 raise TransitionError("run is not the recipient's run")
+            _enum(source, ACK_SOURCES, "source")
             records = self._settle_intents(db, now_s, ack_seconds)
 
             row = db.execute("SELECT * FROM task_intents WHERE id=?", (intent_id,)).fetchone()
             if row["state"] in ("acknowledged", "answered"):
+                # Idempotent: the explicit fact already exists and the first one stays.
                 self._append_runs(records)
-                return self._decode_intent(row)
-            if row["state"] not in ("stored", "delivered"):
+                return self._decode_intent(db, row)
+            if (row["terminal_reason"] is not None or run["status"] not in RUN_LIVE
+                    or run["lease_until"] < now_s):
+                raise TransitionError("request is terminal")
+            if row["state"] not in ("stored", "prepared"):
                 raise TransitionError(f"cannot acknowledge a {row['state']} request")
-            delivered_via = row["delivered_via"] if row["delivered_at"] is not None else "inbox"
-            delivered_at = row["delivered_at"] if row["delivered_at"] is not None else now_s
-            db.execute("""UPDATE task_intents SET state='acknowledged',acked_at=?,delivered_via=?,
-                          delivered_at=? WHERE id=?""",
-                       (now_s, delivered_via, delivered_at, intent_id))
-            self._intent_event(db, db.execute("SELECT * FROM task_intents WHERE id=?", (intent_id,)).fetchone(), now_dt)
+            db.execute("UPDATE task_intents SET state='acknowledged',acked_at=? WHERE id=?", (now_s, intent_id))
+            self._receipt(db, intent_id, "acknowledged", actor="agent", source=source, run_id=run_id, now_s=now_s)
+            self._intent_event(db, db.execute("SELECT * FROM task_intents WHERE id=?", (intent_id,)).fetchone(),
+                               now_dt, stage="acknowledged")
             records.append(dict(lane="tasks", started=now_s, ended=now_s, outcome="intent:acknowledged",
                                 receipt={"task_id": row["task_id"], "run_id": run_id,
                                          "intent_id": intent_id, "to_task_id": row["to_task_id"],
-                                         "event": "intent:acknowledged"},
+                                         "event": "intent:acknowledged", "source": source},
                                 attempts=0, needs_user=False))
             row = db.execute("SELECT * FROM task_intents WHERE id=?", (intent_id,)).fetchone()
             self._append_runs(records)
-        return self._decode_intent(row)
+            result = self._decode_intent(db, row)
+        return result
 
     def requests_for_run(self, run_id: str, claim_token: str, *, ack_seconds: int = 900,
                          now: datetime | None = None) -> list[dict[str, Any]]:
@@ -2382,9 +2818,33 @@ class Store:
             if run["status"] not in RUN_LIVE:
                 raise TransitionError(f"run is not live ({run['status']})")
             records = self._settle_intents(db, now_s, ack_seconds)
-            pending = self._pending_requests(db, run["task_id"], now_s, ack_seconds)
+            pending = self._pending_requests(db, run["id"], now_s, ack_seconds)
             self._append_runs(records)
         return pending
+
+    def retained_requests_for_run(self, run_id: str, claim_token: str,
+                                  known_ids: list[str]) -> list[dict[str, Any]]:
+        """Pure, bounded recovery of complete messages owned by this exact live run."""
+        if (not isinstance(known_ids, list) or len(known_ids) > 20
+                or any(not isinstance(value, str) or not value or len(value) > 128
+                       for value in known_ids)):
+            raise ValueError("known_ids must contain at most 20 nonempty strings of at most 128 characters")
+        with self.connection() as db:
+            run = self._get_run_row(db, run_id)
+            if not self._token_ok(run, claim_token):
+                raise TransitionError("stale claim_token")
+            if run["status"] not in RUN_LIVE:
+                raise TransitionError(f"run is not live ({run['status']})")
+            ids = list(dict.fromkeys(known_ids))
+            if not ids:
+                return []
+            rows = db.execute(
+                f"SELECT * FROM task_intents WHERE id IN ({','.join('?' for _ in ids)}) "
+                "AND to_run_id=? AND to_task_id=? AND admission='accepted' "
+                "AND kind IN ('request','notice')", (*ids, run_id, run["task_id"])).fetchall()
+            by_id = {row["id"]: row for row in rows}
+            return [self._decode_intent(db, by_id[value]) for value in ids if value in by_id]
+
 
     def intent_for_waiter(self, intent_id: str, run_id: str, claim_token: str) -> dict[str, Any]:
         """One read for the `wait` route (agents that talk, U1 S10): the run's own request and the
@@ -2398,18 +2858,21 @@ class Store:
             row = db.execute("SELECT * FROM task_intents WHERE id=?", (intent_id,)).fetchone()
             if row is None:
                 raise KeyError(intent_id)
-            if row["task_id"] != run["task_id"]:
-                raise TransitionError("only the asking task can wait on a request")
+            if row["run_id"] != run_id:
+                raise TransitionError("only the original asking run can wait on a request")
             replies = db.execute("SELECT * FROM task_intents WHERE reply_to=? ORDER BY created_at, rowid",
                                  (intent_id,)).fetchall()
-        return {"intent": self._decode_intent(row), "replies": [self._decode_intent(r) for r in replies]}
+            result = {"intent": self._decode_intent(db, row),
+                      "replies": [self._decode_intent(db, r) for r in replies]}
+        return result
 
     def intent_for_notice(self, chat_id: str, message_id: int) -> dict[str, Any] | None:
         """The row whose Telegram notice is this message (U5), or None."""
         with self.connection() as db:
             row = db.execute("SELECT * FROM task_intents WHERE tg_chat_id=? AND tg_message_id=?",
                              (str(chat_id), int(message_id))).fetchone()
-        return self._decode_intent(row) if row is not None else None
+            result = self._decode_intent(db, row) if row is not None else None
+        return result
 
     def list_intents(self, task_id: str) -> list[dict[str, Any]]:
         with self.connection() as db:
@@ -2422,9 +2885,10 @@ class Store:
     def get_intent(self, intent_id: str) -> dict[str, Any]:
         with self.connection() as db:
             row = db.execute("SELECT * FROM task_intents WHERE id=?", (intent_id,)).fetchone()
-        if row is None:
-            raise KeyError(intent_id)
-        return self._decode_intent(row)
+            if row is None:
+                raise KeyError(intent_id)
+            result = self._decode_intent(db, row)
+        return result
 
     def sweep_intents(self, now: datetime | None = None, ack_seconds: int = 900) -> list[dict[str, Any]]:
         now_dt = now or datetime.now(timezone.utc)
@@ -2435,26 +2899,29 @@ class Store:
             records = self._settle_intents(db, now_s, ack_seconds)
             notices = []
             for row in db.execute(
-                "SELECT * FROM task_intents WHERE state IN ('undeliverable','expired') "
+                "SELECT * FROM task_intents WHERE (terminal_reason IS NOT NULL OR state IN ('undeliverable','expired','unavailable')) "
                 "AND notified_at IS NULL"
             ).fetchall():
-                item = self._decode_intent(row)
-                item["notice"] = row["state"]
+                item = self._decode_intent(db, row)
+                item["notice"] = row["terminal_reason"] or row["state"]
                 notices.append(item)
             # Rows addressed to the operator (questions and replies alike) are noticed on the
             # next tick, not after the acknowledgement window (agents that talk, D1 and I).
             for row in db.execute(
                 "SELECT * FROM task_intents WHERE to_task_id=? AND kind='request' "
-                "AND state IN ('stored','delivered') AND notified_at IS NULL ORDER BY created_at, rowid",
+                "AND terminal_reason IS NULL AND state IN ('stored','prepared') "
+                "AND notified_at IS NULL ORDER BY created_at, rowid",
                 (OPERATOR,)).fetchall():
-                item = self._decode_intent(row)
+                item = self._decode_intent(db, row)
                 item["notice"] = "operator"
                 notices.append(item)
+            # SU3 D6a: "waiting" means no harness has prepared the row into its receiver's
+            # context within the window; a prepared row is the agent's to answer, not news.
             for row in db.execute(
-                "SELECT * FROM task_intents WHERE state IN ('stored','delivered') AND notified_at IS NULL "
-                "AND to_task_id != ? AND COALESCE(delivered_at, created_at) < ?",
+                "SELECT * FROM task_intents WHERE state='stored' AND notified_at IS NULL "
+                "AND terminal_reason IS NULL AND to_task_id != ? AND created_at < ?",
                 (OPERATOR, threshold_s)).fetchall():
-                item = self._decode_intent(row)
+                item = self._decode_intent(db, row)
                 item["notice"] = "waiting"
                 notices.append(item)
             self._append_runs(records)
@@ -2470,12 +2937,18 @@ class Store:
                 result = db.execute(
                     "UPDATE task_intents SET notified_at=?, tg_chat_id=COALESCE(?, tg_chat_id), "
                     "tg_message_id=COALESCE(?, tg_message_id) WHERE id=? AND notified_at IS NULL "
-                    "AND state IN ('stored','delivered')",
+                    "AND terminal_reason IS NULL AND state IN ('stored','prepared')",
                     (now_s, chat_id, message_id, intent_id))
+                if notice == "operator" and result.rowcount == 1:
+                    # SU3 D3/F9: the operator channel accepted the post -- the operator's
+                    # harness-queue acceptance, recorded as a fact rather than inferred.
+                    self._receipt(db, intent_id, "queued", actor="operator_channel", source="operator_channel",
+                                  run_id=None, now_s=now_s)
             else:
                 result = db.execute(
-                    "UPDATE task_intents SET notified_at=? WHERE id=? AND notified_at IS NULL AND state=?",
-                    (now_s, intent_id, notice))
+                    "UPDATE task_intents SET notified_at=? WHERE id=? AND notified_at IS NULL "
+                    "AND (terminal_reason=? OR (terminal_reason IS NULL AND state=?))",
+                    (now_s, intent_id, notice, notice))
         return result.rowcount == 1
 
     # -- scope declarations, dependencies, blockers, assessments (parallel step 2,
@@ -2698,7 +3171,7 @@ class Store:
                 "AND ti.retracted_at IS NULL AND t.status NOT IN ('done','cancelled') "
                 "ORDER BY ti.created_at, ti.rowid",
                 (run["task_id"], task_row["repo"])).fetchall()
-            return [self._decode_intent(row) for row in rows]
+            return [self._decode_intent(db, row) for row in rows]
 
     def overlaps_for_task(self, task_id: str, *,
                           severities: tuple[str, ...] = ("high", "medium")) -> list[dict[str, Any]]:

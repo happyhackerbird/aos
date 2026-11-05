@@ -69,6 +69,70 @@ def exit_codes(name: str, count: int) -> list[int | None]:
     return codes
 
 
+# Verification gates U3: the regular *.xml files directly in $AOS_TEST_RESULTS, never a link, as JSON
+# [[name, size], ...] in name order, one more than the cap so a cut is visible; `null` without the directory.
+RESULTS_LISTING_PY = (
+    "import json, os, stat, sys\n"
+    f"d = {evidence.TEST_RESULTS_DIR!r}\n"
+    "try:\n"
+    "    names = sorted(os.listdir(d))\n"
+    "except OSError:\n"
+    "    print('null'); sys.exit(0)\n"
+    "found = []\n"
+    "for n in names:\n"
+    "    if not n.endswith('.xml'):\n"
+    "        continue\n"
+    "    try:\n"
+    "        s = os.lstat(os.path.join(d, n))\n"
+    "    except OSError:\n"
+    "        continue\n"
+    "    if stat.S_ISREG(s.st_mode):\n"
+    "        found.append([n, s.st_size])\n"
+    f"    if len(found) > {evidence.TEST_RESULT_FILES_MAX}:\n"
+    "        break\n"
+    "print(json.dumps(found))\n"
+)
+
+
+def read_test_outcomes(name: str) -> tuple[dict[str, str] | None, list[str]]:
+    """The test-level outcomes the commands of a fresh acceptance (or before-run) sandbox wrote as JUnit XML into
+    $AOS_TEST_RESULTS, merged over at most TEST_RESULT_FILES_MAX files of at most TEST_RESULT_FILE_MAX bytes each,
+    and a note per file left out. None when there is nothing to compare: no directory, no readable file, or a listing
+    that fails; that is no test-level comparison, never a pass. Read before the sandbox is deleted."""
+    adapter = _adapter()
+    try:
+        got = adapter.sandbox_exec_direct(name, ["/usr/bin/python3", "-I", "-c", RESULTS_LISTING_PY], timeout=60)
+        listing = json.loads(got.stdout) if got.returncode == 0 else None
+    except Exception:  # noqa: BLE001 -- a listing is best effort; none reads as `no test results`
+        return None, ["test results: the listing failed"]
+    if not isinstance(listing, list):
+        return None, []
+    notes: list[str] = []
+    if len(listing) > evidence.TEST_RESULT_FILES_MAX:
+        notes.append(f"test results: only the first {evidence.TEST_RESULT_FILES_MAX} files read")
+    files: list[dict[str, str]] = []
+    for entry in listing[:evidence.TEST_RESULT_FILES_MAX]:
+        if (not isinstance(entry, list) or len(entry) != 2 or not isinstance(entry[0], str)
+                or "/" in entry[0] or not isinstance(entry[1], int)):
+            continue
+        shown = evidence._cut(entry[0], 80)
+        if entry[1] > evidence.TEST_RESULT_FILE_MAX:
+            notes.append(f"test results: {shown} is over {evidence.TEST_RESULT_FILE_MAX} bytes, not read")
+            continue
+        try:
+            read = adapter.sandbox_exec_direct_bytes(
+                name, ["/usr/bin/head", "-c", str(evidence.TEST_RESULT_FILE_MAX + 1),
+                       posixpath.join(evidence.TEST_RESULTS_DIR, entry[0])], timeout=120)
+            if read.returncode != 0:
+                raise ValueError("unreadable")
+            files.append(evidence.parse_junit(read.stdout))
+        except Exception as exc:  # noqa: BLE001 -- a file this reader refuses is left out and named
+            notes.append(f"test results: {shown} not used ({str(exc)[:120]})")
+    if not files:
+        return None, notes
+    return evidence.merge_outcomes(files), notes
+
+
 def outputs(name: str, count: int) -> list[str]:
     """The last MiB of each fresh-acceptance command's output."""
     adapter = _adapter()
@@ -81,7 +145,7 @@ def outputs(name: str, count: int) -> list[str]:
 
 
 def final_message(name: str, harness: str) -> str | None:
-    """The agent's final message from the TAIL of /sandbox/harness.out for claude and codex.
+    """The agent's final message from the TAIL of /sandbox/harness.out for claude, codex and devin.
 
     A Claude transcript over the cap is read from its last FINAL_MESSAGE_CAP + 1 bytes, with the byte
     before them deciding whether the first retained line is complete (a newline) or partial (dropped).

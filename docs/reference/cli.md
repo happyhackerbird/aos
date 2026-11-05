@@ -16,6 +16,7 @@ Use `aos --help` and `aos <command> --help` for parser flags.
 | `add`, `edit`, `list`, `show` | Create and inspect task specifications; `show` includes the family block |
 | `ready`, `unready`, `cancel`, `requeue`, `accept` | Operator task transitions |
 | `review`, `reject` | Read a run's captured evidence; refuse the newest review run ([Reviewing a run](operations.md#reviewing-a-run)) |
+| `record-check` | Record a required check for the newest review run's exact head ([Required checks](#required-checks)) |
 | `repo list`, `repo set`, `repo rm` | Repository defaults; `set` requires `--host`; `--deliver push\|pr` and `--auto-ready-proposals on\|off` keep their stored value when omitted; test commands belong in committed `aos-workflow.toml` |
 | `run` | Run a ready task in OpenShell; there is no `--dry-run` |
 | `attach` | Attach the terminal to an interactive run's session; `--takeover` detaches another client |
@@ -33,7 +34,12 @@ Use `aos --help` and `aos <command> --help` for parser flags.
 `--harness`, `--host` and `--execution headless|interactive`. `add` alone takes `--reviews AO-<m>`: the new task reviews
 task AO-<m> of the same repository (another repository or an unknown id refuses, and the
 field never changes afterwards), its run's job copy also carries `ao/AO-<m>` to read, and
-its prompt names that branch. Readiness requires a nonempty brief, not explicit
+its prompt names that branch. `add` also takes repeatable `--require NAME`: a check that
+must be on record for the run's head before `accept` or `merge` ([Required
+checks](#required-checks)), and `--regression-guard`: run even when the acceptance
+commands already pass before the agent, which with a before-run otherwise ends the
+run before the agent starts ([before and
+after](configuration.md#before-and-after-the-agent)). Readiness requires a nonempty brief, not explicit
 commands or repository validation. Only tiers 0–2 can run; there is no tier-3 confirmation override. `requeue --ready`
 returns directly to ready; dependency warnings require an explicit `--force`
 override. `integrate --keep` retains its scratch worktree for inspection.
@@ -45,18 +51,24 @@ one-time Dropbox authorization for the Super Productivity source; it needs no bu
 
 ## Run a task
 
-An OpenShell task with `--execution interactive` needs the `omp` flavour of the `pi`
-harness and messaging enabled. The runner prints `aos attach <run-id>`: run it on a
-host that reaches the gateway, from a Herdr pane or any terminal, to join that run's
-terminal session. Reattaching starts nothing new; closing the client leaves the run
-and its deadline alone. The agent commits and calls `mcp__aos_submit(report, commit,
-children)` to request verification of exactly that commit. `/exit` without a
-submission fails the task. `--takeover` detaches an existing client before attaching;
-a second plain attach is refused with `already has an attached client`, and a run
-that is not live is refused (`is review, not live`, `is cancelled, not live`,
-`is blocked, not live`). Text typed while the agent sits in `mcp__aos_inbox_wait`
-queues as omp steering until the wait returns; Esc aborts the wait, and `aos ask
-<task> "<text>" --operator` ends it with the message as its result.
+Interactive OpenShell tasks support `harness=pi` with `AOS_OPENSHELL_PI_FLAVOUR=omp`,
+or `harness=claude`; both require automatic messaging (`AOS_OPENSHELL_COMMS=1`).
+`aos show` prints `aos attach <run-id>` for a live run in its harness stage. Run it
+from a Herdr pane or any terminal on a host that reaches the gateway. Reattaching
+joins the same terminal; closing the client leaves the agent and deadline running.
+If the interactive harness is still starting, `aos attach` prints one waiting
+note and polls for its tmux session for up to 60 seconds. It rechecks the run
+between probes and refuses it if it ends, becomes headless, leaves the harness
+stage, or no longer has an OpenShell sandbox. Only a missing tmux session is
+retried; gateway and sandbox exec failures are reported immediately. Each probe
+is limited by the remaining wait deadline.
+Claude starts in its normal interactive terminal mode; omp uses its interactive
+terminal mode. Both expose the run-bound `aos_submit` tool. The agent commits and
+submits the exact commit for managed acceptance; `/exit` without submission fails.
+`--takeover` detaches the current client before attaching. A second plain attach is
+refused with `already has an attached client`; unknown, ended and headless runs are
+refused. Omp steering behavior while waiting in `mcp__aos_inbox_wait` is specific
+to omp; Claude receives operator input through its normal terminal interaction.
 
 `aos show <parent>` prints `family: <n> children (parallel capacity <k>; ...)`
 after the runs when the parent has children, followed by one `child AO-<m>: ...`
@@ -250,6 +262,54 @@ in this repo start ready or wait in the backlog (the default); omitted, like
 note and delivery. `aos integrate` only detects: a failed, conflicting, or
 errored check fixes nothing by itself, and the task is requeued (`aos
 requeue`) or fixed by hand.
+
+### Required checks
+
+A task can require named checks before it is accepted or merged. The names come from
+the repository's `required_checks` in `aos-workflow.toml`
+([configuration](configuration.md#repository-workflow-file)) plus each
+`aos add --require NAME`; the runner merges the two at claim, and the run keeps that
+list, so a later change reaches only later runs. A name matches
+`[a-z0-9][a-z0-9-]{0,39}`; a task holds at most 20, and its own list is part of its
+spec hash.
+
+```
+aos record-check AO-<n> <name> --commit <sha> --note TEXT
+aos record-check AO-<n> <name> --commit <sha> --waive --note TEXT
+```
+
+records a check for the task's newest review run with the operator token. It is refused
+unless that run exists and `--commit` is its head, all 40 characters: its PR head once
+a PR is open, else its result commit (the commit `aos integrate` checks). The note says
+what was checked and where the evidence is; a waiver's note says why the check does not
+apply. A later record of the same name for the run replaces the earlier one, and
+`runs.jsonl` keeps both (`check:passed`, `check:waived`). A worker's sandbox holds only
+its run credential, never the operator token, so an agent cannot record a check for its
+own result. A coordinator session holding the operator token can, as the operator's
+agent.
+
+`test-changes` is added by AOS, never configured: a run that reached review with tests
+that passed before the agent and not after
+([before and after](configuration.md#before-and-after-the-agent)) requires it until a
+record names the reason, usually a waiver. `aos show` lists those tests on a
+`test changes:` line.
+
+`merge-check` is computed, never recorded: it passes when the run's latest integration
+record passed for its current head. Neither `aos accept` nor the bus reads GitHub, so
+whether the base moved since that check is decided only by `aos merge`'s integration
+gate on the PR route; on the push route run `aos integrate` again before `aos accept`
+when the base moved.
+
+`aos accept` refuses with `required checks missing: <names>` while any required check is
+missing or on record for another commit (`stale`: recorded before the head changed).
+Each run starts with no records. `aos merge` refuses the same way, before its
+integration check and before any GitHub call. A PR GitHub already merged, through its
+UI or a merge whose task close failed, is closed whatever is missing, because the merge
+cannot be undone. A task and repository without required checks behave as before.
+`aos show` prints `required_checks:` for such a task and, under each run, one
+`check <name>: <passed|waived|stale|missing> (<note or detail>)` line per required check;
+`aos review`, which needs a run with evidence, prints the same lines and, for a run in
+review, the missing names; `aos show` is the view for every repository.
 
 `aos integrate <task id> [--backend openshell]` runs merged checks only in OpenShell.
 `AOS_BACKEND` is shared with `aos run`; any value other than `openshell` is refused.

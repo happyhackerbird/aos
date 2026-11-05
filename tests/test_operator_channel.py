@@ -21,6 +21,8 @@ def asking_run(store: Store, repo: str = "repo-chan") -> dict[str, Any]:
                            expected_spec_hash=task["spec_hash"],
                            effective_acceptance=task["acceptance"], acceptance_source="task")
     store.start_run(run["id"], run["claim_token"], base_commit="a", branch="b", worktree="/x")
+    store.update_receiver(run["id"], run["claim_token"], action="receiving",
+                          owner=run["id"], reason="native_start")
     return run
 
 
@@ -47,18 +49,23 @@ class FakeChannel:
 
 def test_notice_text_for_a_question_and_for_a_waiting_row() -> None:
     question = {"id": "AO-1-i1", "kind": "request", "task_id": "AO-1", "to_task_id": "operator",
-                "body": "which branch?", "notice": "operator"}
-    assert notice_text(question) == "❓ AO-1 asks you (AO-1-i1):\nwhich branch?\nReply to this message to answer."
+                "body": "which branch?", "notice": "operator",
+                "receipts": [{"stage": "stored", "actor": "bus", "source": "store", "at": "T1", "count": 1}]}
+    assert "AO-1 asks you (AO-1-i1)" in notice_text(question) and "admission=" in notice_text(question)
+    assert "receipts=[stored@T1/bus:store" in notice_text(question) and "acknowledged=absent" in notice_text(question)
     waiting = {"id": "AO-1-i2", "kind": "notice", "task_id": "AO-1", "to_task_id": "AO-2",
-               "body": "x" * 300, "notice": "waiting"}
-    assert notice_text(waiting) == f"⚠️ notice AO-1-i2 AO-1 -> AO-2 waiting: {'x' * 200}"
+               "body": "x" * 300, "notice": "waiting",
+               "receipts": [{"stage": "stored", "actor": "legacy", "source": "migration", "at": "T0", "count": 1}]}
+    assert f"waiting: {'x' * 200}" in notice_text(waiting) and "terminal_reason=" in notice_text(waiting)
+    assert "stored@T0/legacy:migration [legacy]" in notice_text(waiting) and "prepared=absent" in notice_text(waiting)
 
 
 def test_answer_reports_each_outcome_in_one_line(store: Store) -> None:
     question = ask_operator(store)
     first = answer(store, question["id"], "main, please")
     replies = [row for row in store.list_intents(question["task_id"]) if row["reply_to"] == question["id"]]
-    assert len(replies) == 1 and first == f"answered {question['id']} ({replies[0]['id']})"
+    assert len(replies) == 1 and first.startswith(f"answered {question['id']} ({replies[0]['id']})")
+    assert "reply admission=accepted" in first and replies[0]["to_run_id"] in first
     assert answer(store, question["id"], "again") == f"{question['id']} not answered: cannot answer a answered request"
     other = ask_operator(store)
     assert answer(store, other["id"], "see <agent-request>") == \

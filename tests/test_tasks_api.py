@@ -10,6 +10,8 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from agent_os import openshell_runner
+from agent_os import store as store_module
 from agent_os.api import create_app
 from agent_os.config import Settings
 from agent_os.store import Store
@@ -72,7 +74,7 @@ NEW_ROUTES = [
     ("POST", "/tasks"), ("GET", "/tasks"), ("GET", "/tasks/AO-1"), ("PATCH", "/tasks/AO-1"),
     ("POST", "/tasks/AO-1/ready"), ("POST", "/tasks/AO-1/unready"), ("POST", "/tasks/AO-1/cancel"),
     ("POST", "/tasks/AO-1/accept"), ("POST", "/tasks/AO-1/requeue"), ("POST", "/tasks/AO-1/claim"),
-    ("POST", "/tasks/AO-1/preflight-refusal"),
+    ("POST", "/tasks/AO-1/preflight-refusal"), ("POST", "/tasks/AO-1/checks"),
     ("GET", "/repos"), ("PUT", "/repos/demo"), ("DELETE", "/repos/demo"), ("GET", "/capabilities"),
     ("POST", "/runs/AO-1-r1/heartbeat"), ("POST", "/runs/AO-1-r1/start"), ("POST", "/runs/AO-1-r1/result"),
 ]
@@ -244,6 +246,37 @@ def test_cancel_during_live_run_then_heartbeat_shows_cancelled_lease_unchanged(c
     body = response.json()
     assert body["status"] == "cancelled"
     assert body["lease_until"] == lease_before
+
+
+@pytest.mark.parametrize("harness", openshell_runner.HARNESSES)
+def test_every_runner_harness_is_accepted_through_a_run(client: TestClient, harness: str) -> None:
+    # The runner posts its harness as session_agent on every run, and FakeBus in the runner tests validates no body:
+    # this is the check that a harness the runner offers is one the bus lets start.
+    assert harness in store_module.HARNESSES
+    authorize(client)
+    created = client.post("/tasks", json={"repo": f"repo-{harness}", "title": "t", "brief": "b",
+                                          "acceptance": ["true"], "harness": harness})
+    assert created.status_code == 200, created.text
+    run = claim(client, ready(client, created.json()["id"])["id"]).json()
+    started = client.post(f"/runs/{run['id']}/start", json={
+        "claim_token": run["claim_token"], "base_commit": "a", "branch": "b", "worktree": "/x",
+        "session_owner": "runner", "session_agent": harness})
+    assert started.status_code == 200, started.text
+    beat = client.post(f"/runs/{run['id']}/heartbeat", json={"claim_token": run["claim_token"],
+                                                             "session_agent": harness})
+    assert beat.status_code == 200, beat.text
+
+
+def test_tasks_accept_the_devin_harness_and_refuse_an_unknown_one(client: TestClient) -> None:
+    authorize(client)
+    created = client.post("/tasks", json={"repo": "r", "title": "t", "harness": "devin"})
+    assert created.status_code == 200, created.text
+    assert created.json()["harness"] == "devin"
+    other = create_task(client)["id"]
+    changed = client.patch(f"/tasks/{other}", json={"harness": "devin"})
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["harness"] == "devin"
+    assert client.post("/tasks", json={"repo": "r", "title": "t", "harness": "nosuch"}).status_code == 422
 
 
 # -- result -------------------------------------------------------------------
@@ -499,7 +532,7 @@ def test_automatic_sweep_blocks_expired_lease(tmp_path: Path, fake: FakeHTTP,
 
 # -- request ledger routes (task_intents) --------------------------------------
 
-def make_run(client: TestClient, repo: str) -> dict[str, Any]:
+def make_run(client: TestClient, repo: str, *, receiving: bool = True) -> dict[str, Any]:
     """Create, ready, claim and start a task; leaves Authorization set on client."""
     authorize(client)
     task = ready(client, create_task(client, repo=repo)["id"])
@@ -507,6 +540,10 @@ def make_run(client: TestClient, repo: str) -> dict[str, Any]:
     started = client.post(f"/runs/{run['id']}/start", json={
         "claim_token": run["claim_token"], "base_commit": "a", "branch": "b", "worktree": "/x"})
     assert started.status_code == 200, started.text
+    if receiving:
+        opened = client.post(f"/runs/{run['id']}/receiver", json={
+            "claim_token": run["claim_token"], "action": "receiving", "owner": run["id"], "reason": "native_start"})
+        assert opened.status_code == 200, opened.text
     return {"task": task, "run": run}
 
 
@@ -522,20 +559,20 @@ def test_intent_routes_work_with_no_authorization_header(client: TestClient) -> 
     intent = created.json()
     assert intent["state"] == "stored"
 
-    delivered = client.post(f"/intents/{intent['id']}/delivered", json={
-        "run_id": recipient["run"]["id"], "claim_token": recipient["run"]["claim_token"], "via": "socket"})
+    delivered = client.post(f"/intents/{intent['id']}/receipt", json={
+        "run_id": recipient["run"]["id"], "claim_token": recipient["run"]["claim_token"], "stage": "prepared", "source": "hook"})
     assert delivered.status_code == 200, delivered.text
-    assert delivered.json()["state"] == "delivered"
+    assert delivered.json()["state"] == "prepared"
 
     acked = client.post(f"/intents/{intent['id']}/ack", json={
-        "run_id": recipient["run"]["id"], "claim_token": recipient["run"]["claim_token"]})
+        "run_id": recipient["run"]["id"], "claim_token": recipient["run"]["claim_token"], "source": "cli"})
     assert acked.status_code == 200, acked.text
     assert acked.json()["state"] == "acknowledged"
 
     pending = client.post(f"/runs/{recipient['run']['id']}/requests", json={
         "claim_token": recipient["run"]["claim_token"]})
     assert pending.status_code == 200, pending.text
-    assert pending.json() == {"pending_requests": [], "overlaps": []}
+    assert pending.json()["pending_requests"] == [] and pending.json()["overlaps"] == []
 
 
 def test_intent_wrong_claim_token_is_409(client: TestClient) -> None:
@@ -550,10 +587,10 @@ def test_intent_wrong_claim_token_is_409(client: TestClient) -> None:
     assert client.post(f"/tasks/{sender['task']['id']}/intents", json={
         "run_id": sender["run"]["id"], "claim_token": "wrong",
         "to_task_id": recipient["task"]["id"], "body": "hello2"}).status_code == 409
-    assert client.post(f"/intents/{intent['id']}/delivered", json={
-        "run_id": recipient["run"]["id"], "claim_token": "wrong", "via": "socket"}).status_code == 409
+    assert client.post(f"/intents/{intent['id']}/receipt", json={
+        "run_id": recipient["run"]["id"], "claim_token": "wrong", "stage": "prepared", "source": "hook"}).status_code == 409
     assert client.post(f"/intents/{intent['id']}/ack", json={
-        "run_id": recipient["run"]["id"], "claim_token": "wrong"}).status_code == 409
+        "run_id": recipient["run"]["id"], "claim_token": "wrong", "source": "cli"}).status_code == 409
     assert client.post(f"/runs/{recipient['run']['id']}/requests",
                        json={"claim_token": "wrong"}).status_code == 409
 
@@ -581,10 +618,10 @@ def test_intent_foreign_token_is_409(client: TestClient, bad_token: str, label: 
     assert raw_json_post(client, f"/tasks/{sender['task']['id']}/intents", {
         "run_id": sender["run"]["id"], "claim_token": bad_token,
         "to_task_id": recipient["task"]["id"], "body": "hi"}).status_code == 409
-    assert raw_json_post(client, f"/intents/{intent['id']}/delivered", {
-        "run_id": recipient["run"]["id"], "claim_token": bad_token, "via": "socket"}).status_code == 409
+    assert raw_json_post(client, f"/intents/{intent['id']}/receipt", {
+        "run_id": recipient["run"]["id"], "claim_token": bad_token, "stage": "prepared", "source": "hook"}).status_code == 409
     assert raw_json_post(client, f"/intents/{intent['id']}/ack", {
-        "run_id": recipient["run"]["id"], "claim_token": bad_token}).status_code == 409
+        "run_id": recipient["run"]["id"], "claim_token": bad_token, "source": "cli"}).status_code == 409
     assert raw_json_post(client, f"/runs/{recipient['run']['id']}/requests",
                          {"claim_token": bad_token}).status_code == 409
 
@@ -631,13 +668,13 @@ def test_intent_not_found_is_404(client: TestClient) -> None:
     sender = make_run(client, "repo-intent-404")
     del client.headers["Authorization"]
 
-    delivered = client.post("/intents/AO-999-i1/delivered", json={
-        "run_id": sender["run"]["id"], "claim_token": sender["run"]["claim_token"], "via": "socket"})
+    delivered = client.post("/intents/AO-999-i1/receipt", json={
+        "run_id": sender["run"]["id"], "claim_token": sender["run"]["claim_token"], "stage": "prepared", "source": "hook"})
     assert delivered.status_code == 404
     assert delivered.json()["detail"] == "Intent not found"
 
     acked = client.post("/intents/AO-999-i1/ack", json={
-        "run_id": sender["run"]["id"], "claim_token": sender["run"]["claim_token"]})
+        "run_id": sender["run"]["id"], "claim_token": sender["run"]["claim_token"], "source": "cli"})
     assert acked.status_code == 404
     assert acked.json()["detail"] == "Intent not found"
 
@@ -677,9 +714,9 @@ def test_wrong_token_and_unknown_run_leave_runs_jsonl_byte_identical(
     intent = client.post(f"/tasks/{sender['task']['id']}/intents", json={
         "run_id": sender["run"]["id"], "claim_token": sender["run"]["claim_token"],
         "to_task_id": recipient["task"]["id"], "body": "hello"}).json()
-    delivered = client.post(f"/intents/{intent['id']}/delivered", json={
+    delivered = client.post(f"/intents/{intent['id']}/receipt", json={
         "run_id": recipient["run"]["id"], "claim_token": recipient["run"]["claim_token"],
-        "via": "socket"})
+        "stage": "prepared", "source": "hook"})
     assert delivered.status_code == 200, delivered.text
 
     # End the recipient's run so the row is ripe for expiry: this is what makes
@@ -699,17 +736,17 @@ def test_wrong_token_and_unknown_run_leave_runs_jsonl_byte_identical(
         assert client.post(f"/tasks/{sender['task']['id']}/intents", json={
             "run_id": sender["run"]["id"], "claim_token": "wrong",
             "to_task_id": recipient["task"]["id"], "body": "x"}).status_code == 409
-        assert client.post(f"/intents/{intent['id']}/delivered", json={
-            "run_id": recipient["run"]["id"], "claim_token": "wrong", "via": "socket"}).status_code == 409
+        assert client.post(f"/intents/{intent['id']}/receipt", json={
+            "run_id": recipient["run"]["id"], "claim_token": "wrong", "stage": "prepared", "source": "hook"}).status_code == 409
         assert client.post(f"/intents/{intent['id']}/ack", json={
-            "run_id": recipient["run"]["id"], "claim_token": "wrong"}).status_code == 409
+            "run_id": recipient["run"]["id"], "claim_token": "wrong", "source": "cli"}).status_code == 409
         assert client.post(f"/runs/{recipient['run']['id']}/requests",
                            json={"claim_token": "wrong"}).status_code == 409
 
     assert store.runs_path.read_text() == before
 
 
-def test_report_delivery_note_reaches_runs_jsonl(client: TestClient, store: Store) -> None:
+def test_report_receipt_note_reaches_runs_jsonl(client: TestClient, store: Store) -> None:
     sender = make_run(client, "repo-intent-note-a")
     recipient = make_run(client, "repo-intent-note-b")
     del client.headers["Authorization"]
@@ -717,16 +754,16 @@ def test_report_delivery_note_reaches_runs_jsonl(client: TestClient, store: Stor
         "run_id": sender["run"]["id"], "claim_token": sender["run"]["claim_token"],
         "to_task_id": recipient["task"]["id"], "body": "hi"}).json()
 
-    response = client.post(f"/intents/{intent['id']}/delivered", json={
+    response = client.post(f"/intents/{intent['id']}/receipt", json={
         "run_id": recipient["run"]["id"], "claim_token": recipient["run"]["claim_token"],
-        "via": "socket", "note": "push failed once, retried"})
+        "stage": "prepared", "source": "hook", "note": "push failed once, retried"})
     assert response.status_code == 200, response.text
 
     records = [json.loads(line) for line in store.runs_path.read_text().splitlines()]
-    delivered = [r for r in records if r["receipt"].get("intent_id") == intent["id"]
-                and r["outcome"] == "intent:delivered"]
-    assert len(delivered) == 1
-    assert delivered[0]["receipt"]["note"] == "push failed once, retried"
+    prepared = [r for r in records if r["receipt"].get("intent_id") == intent["id"]
+                and r["outcome"] == "intent:prepared"]
+    assert len(prepared) == 1
+    assert prepared[0]["receipt"]["note"] == "push failed once, retried"
 
 
 def test_sweep_requests_sends_once_per_notice_and_resends_after_failure(
@@ -734,12 +771,12 @@ def test_sweep_requests_sends_once_per_notice_and_resends_after_failure(
     client, store, settings = build_client(tmp_path, fake, AOS_REQUEST_ACK_SECONDS=1)
     authorize(client)
     sender = make_run_on(client, "repo-sweep-a")
-    recipient_task = create_task(client, repo="repo-sweep-b")
+    recipient = make_run_on(client, "repo-sweep-b")
 
     del client.headers["Authorization"]
     created = client.post(f"/tasks/{sender['task']['id']}/intents", json={
         "run_id": sender["run"]["id"], "claim_token": sender["run"]["claim_token"],
-        "to_task_id": recipient_task["id"], "body": "please look"})
+        "to_task_id": recipient["task"]["id"], "body": "please look"})
     assert created.status_code == 200, created.text
     intent_id = created.json()["id"]
 
@@ -906,12 +943,7 @@ def test_sweep_findings_does_not_stamp_while_telegram_disabled_then_stamps_once_
 
 def make_run_on(client: TestClient, repo: str) -> dict[str, Any]:
     """Like make_run, but assumes `client` is already authorized (build_client path)."""
-    task = ready(client, create_task(client, repo=repo)["id"])
-    run = claim(client, task["id"]).json()
-    started = client.post(f"/runs/{run['id']}/start", json={
-        "claim_token": run["claim_token"], "base_commit": "a", "branch": "b", "worktree": "/x"})
-    assert started.status_code == 200, started.text
-    return {"task": task, "run": run}
+    return make_run(client, repo)
 
 
 # == integration checks (parallel step 3, unit U1) ============================
@@ -1298,18 +1330,18 @@ def test_pull_exact_response_gains_overlaps_empty(client: TestClient) -> None:
     assert created.status_code == 200, created.text
     intent = created.json()
 
-    delivered = client.post(f"/intents/{intent['id']}/delivered", json={
-        "run_id": recipient["run"]["id"], "claim_token": recipient["run"]["claim_token"], "via": "socket"})
+    delivered = client.post(f"/intents/{intent['id']}/receipt", json={
+        "run_id": recipient["run"]["id"], "claim_token": recipient["run"]["claim_token"], "stage": "prepared", "source": "hook"})
     assert delivered.status_code == 200, delivered.text
 
     acked = client.post(f"/intents/{intent['id']}/ack", json={
-        "run_id": recipient["run"]["id"], "claim_token": recipient["run"]["claim_token"]})
+        "run_id": recipient["run"]["id"], "claim_token": recipient["run"]["claim_token"], "source": "cli"})
     assert acked.status_code == 200, acked.text
 
     pending = client.post(f"/runs/{recipient['run']['id']}/requests", json={
         "claim_token": recipient["run"]["claim_token"]})
     assert pending.status_code == 200, pending.text
-    assert pending.json() == {"pending_requests": [], "overlaps": []}
+    assert pending.json()["pending_requests"] == [] and pending.json()["overlaps"] == []
 
 
 # == parallel step 2, unit U5: the depends_on soft gate on ready / requeue ====
@@ -1575,7 +1607,7 @@ def test_reject_route_requires_auth(client: TestClient) -> None:
 
 
 def test_run_events_publish_and_read(client: TestClient) -> None:
-    setup = make_run(client, "repo-events-pin")
+    setup = make_run(client, "repo-events-pin", receiving=False)
     run = setup["run"]
     events = [{"seq": seq, "at": "2026-10-17T02:00:00+02:00", "type": "note",
                "payload": {"text": f"event {seq}"}} for seq in (1, 2, 3)]
@@ -1602,7 +1634,7 @@ def test_run_events_wait_returns_published_event(client: TestClient, store: Stor
                                                 monkeypatch: pytest.MonkeyPatch) -> None:
     import agent_os.api as api_module
 
-    run = make_run(client, "repo-events-wait-pin")["run"]
+    run = make_run(client, "repo-events-wait-pin", receiving=False)["run"]
     sleeps = []
 
     async def publish_on_sleep(seconds):
@@ -1630,7 +1662,7 @@ def _nested_event_payload(depth: int) -> dict[str, Any]:
     "nan", "surrogate", "depth", "oversize", "missing_token", "empty", "too_many", "syntax", "bigint",
 ])
 def test_run_events_publish_refusals(client: TestClient, case: str) -> None:
-    setup = make_run(client, "repo-refused-events")
+    setup = make_run(client, "repo-refused-events", receiving=False)
     run = setup["run"]
     path = f"/runs/{run['id']}/events"
     bad = {
@@ -1688,7 +1720,7 @@ def test_run_events_publish_refusals(client: TestClient, case: str) -> None:
 
 
 def test_run_events_publish_scrubs_token_in_values_and_keys(client: TestClient) -> None:
-    run = make_run(client, "repo-events-scrub")["run"]
+    run = make_run(client, "repo-events-scrub", receiving=False)["run"]
     token = run["claim_token"]
     path = f"/runs/{run['id']}/events"
     payload = {f"key {token}": [f"before {token} after", {"nested": token}]}
@@ -1701,7 +1733,7 @@ def test_run_events_publish_scrubs_token_in_values_and_keys(client: TestClient) 
 
 
 def test_run_events_read_after_above_int64_is_422(client: TestClient) -> None:
-    run = make_run(client, "repo-events-after")["run"]
+    run = make_run(client, "repo-events-after", receiving=False)["run"]
     path = f"/runs/{run['id']}/events"
     assert client.get(path, params={"after": 2**63}).status_code == 422
     response = client.get(path, params={"after": 2**63 - 1})
@@ -1712,7 +1744,7 @@ def test_run_events_read_wait_returns_early_when_run_not_live(client: TestClient
                                                             monkeypatch: pytest.MonkeyPatch) -> None:
     import agent_os.api as api_module
 
-    run = make_run(client, "repo-events-early")["run"]
+    run = make_run(client, "repo-events-early", receiving=False)["run"]
 
     async def no_sleep(seconds):
         raise AssertionError("an early return must not sleep")
@@ -1727,7 +1759,7 @@ def test_run_events_read_wait_returns_early_when_run_not_live(client: TestClient
         "claim_token": run["claim_token"], "status": "review", "report": "done"}).status_code == 200
     response = client.get(path, params={"after": 1, "wait": 30})
     assert response.status_code == 200
-    assert [event["type"] for event in response.json()["events"]] == ["status"]
+    assert [event["type"] for event in response.json()["events"]] == ["status", "receiver"]
     assert response.json()["run"]["status"] == "review"
 
 
@@ -1737,7 +1769,7 @@ def test_run_events_route_is_async_and_awaits_watch_sleep(client: TestClient,
     from types import SimpleNamespace
     import agent_os.api as api_module
 
-    run = make_run(client, "repo-events-async")["run"]
+    run = make_run(client, "repo-events-async", receiving=False)["run"]
     route = next(route for route in client.app.routes if route.path == "/runs/{run_id}/events"
                  and "GET" in route.methods)
     assert inspect.iscoroutinefunction(route.endpoint)
@@ -1759,7 +1791,7 @@ def test_run_events_route_is_async_and_awaits_watch_sleep(client: TestClient,
 
 @pytest.mark.parametrize("method", ["get", "post"])
 def test_run_events_requires_bearer(client: TestClient, method: str) -> None:
-    run = make_run(client, "repo-events-auth")["run"]
+    run = make_run(client, "repo-events-auth", receiving=False)["run"]
     del client.headers["Authorization"]
     kwargs = {"json": {"claim_token": run["claim_token"], "events": [_event_wire()]}} if method == "post" else {}
     assert getattr(client, method)(f"/runs/{run['id']}/events", **kwargs).status_code == 401
@@ -1768,7 +1800,7 @@ def test_run_events_requires_bearer(client: TestClient, method: str) -> None:
 def test_run_events_watchers_cap_429(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     import agent_os.api as api_module
 
-    run = make_run(client, "repo-events-cap")["run"]
+    run = make_run(client, "repo-events-cap", receiving=False)["run"]
     monkeypatch.setattr(api_module, "WATCHERS_MAX", 0)
     path = f"/runs/{run['id']}/events"
     response = client.get(path, params={"wait": 30})
@@ -1786,8 +1818,8 @@ def test_run_events_watchers_are_per_bus(tmp_path: Path, fake: FakeHTTP,
 
     first, first_store, _ = build_client(tmp_path / "first", fake)
     second, second_store, _ = build_client(tmp_path / "second", fake)
-    first_run = make_run(first, "first")["run"]
-    second_run = make_run(second, "second")["run"]
+    first_run = make_run(first, "first", receiving=False)["run"]
+    second_run = make_run(second, "second", receiving=False)["run"]
     monkeypatch.setattr(api_module, "WATCHERS_MAX", 1)
     parked = threading.Event()
     release = threading.Event()
@@ -1828,7 +1860,7 @@ def test_run_events_watcher_slot_released(client: TestClient, store: Store,
     from types import SimpleNamespace
     import agent_os.api as api_module
 
-    run = make_run(client, "repo-events-release")["run"]
+    run = make_run(client, "repo-events-release", receiving=False)["run"]
     monkeypatch.setattr(api_module, "WATCHERS_MAX", 1)
     sleeps = []
 
@@ -1867,7 +1899,7 @@ def test_run_events_wait_on_terminal_run_returns_at_once(client: TestClient, sto
                                                         monkeypatch: pytest.MonkeyPatch) -> None:
     import agent_os.api as api_module
 
-    run = make_run(client, "repo-events-terminal")["run"]
+    run = make_run(client, "repo-events-terminal", receiving=False)["run"]
     store.finish_run(run["id"], run["claim_token"], status="review", report="done")
     last_seq = store.read_run_events(run["id"])["last_seq"]
 
@@ -2062,3 +2094,200 @@ def test_submission_on_a_headless_run_is_refused(client: TestClient) -> None:
     response = client.post(f"/runs/{run['id']}/submission", json={
         "claim_token": run["claim_token"], "report": "done", "commit": "a" * 40})
     assert response.status_code == 409 and "not interactive" in response.json()["detail"]
+
+
+# -- required checks (verification gates U2) ------------------------------------
+
+def _review_with_checks(client: TestClient, required: list[str], **claim_extra: Any) -> tuple[dict, dict]:
+    response = client.post("/tasks", json={"repo": "repo-a", "title": "Gated", "brief": "do it",
+                                           "acceptance": ["true"], "required_checks": required})
+    assert response.status_code == 200, response.text
+    task = response.json()
+    ready(client, task["id"])
+    run = claim(client, task["id"], **claim_extra).json()
+    assert client.post(f"/runs/{run['id']}/start", json={"claim_token": run["claim_token"], "base_commit": "a" * 40,
+                                                        "branch": "b", "worktree": "/x"}).status_code == 200
+    assert client.post(f"/runs/{run['id']}/result", json={"claim_token": run["claim_token"], "status": "review",
+                                                         "report": "ok", "result_commit": "c" * 40,
+                                                         "verdict": "pass"}).status_code == 200
+    return task, run
+
+
+def test_accept_is_refused_naming_the_missing_check_until_it_is_recorded(client: TestClient) -> None:
+    # Proof table, U2 rows 1 and 2.
+    authorize(client)
+    task, run = _review_with_checks(client, ["review"], required_checks=["merge-check"])
+    shown = client.get(f"/tasks/{task['id']}").json()
+    assert shown["required_checks"] == ["review"]
+    assert shown["runs"][0]["required_checks"] == ["merge-check", "review"]
+    assert [c["state"] for c in shown["runs"][0]["checks"]] == ["missing", "missing"]
+    refused = client.post(f"/tasks/{task['id']}/accept")
+    assert refused.status_code == 409 and refused.json()["detail"] == "required checks missing: merge-check, review"
+    wrong = client.post(f"/tasks/{task['id']}/checks", json={"name": "review", "commit": "d" * 40, "note": "x"})
+    assert wrong.status_code == 409 and wrong.json()["detail"].startswith("commit dddddddddddd is not the head of")
+    recorded = client.post(f"/tasks/{task['id']}/checks",
+                           json={"name": "review", "commit": "c" * 40, "note": "AO-9 review"})
+    assert recorded.status_code == 200, recorded.text
+    assert recorded.json()["status"] == "passed" and recorded.json()["run_id"] == run["id"]
+    assert client.post(f"/tasks/{task['id']}/accept").json()["detail"] == "required checks missing: merge-check"
+    waived = client.post(f"/tasks/{task['id']}/checks",
+                         json={"name": "merge-check", "commit": "c" * 40, "note": "x"})
+    assert waived.status_code == 422 and "merge-check is computed" in waived.json()["detail"]
+    store = client.app.state.store
+    store.record_integration(task["id"], run["id"], head_sha="c" * 40, base_branch="main", base_sha="b" * 40,
+                             status="passed", output="ok", worker="w")
+    accepted = client.post(f"/tasks/{task['id']}/accept")
+    assert accepted.status_code == 200 and accepted.json()["status"] == "done"
+
+
+def test_a_worker_credential_cannot_record_a_check(client: TestClient) -> None:
+    authorize(client)
+    task, run = _review_with_checks(client, ["review"])
+    body = {"name": "review", "commit": "c" * 40, "note": "self-approved"}
+    for headers in ({"Authorization": f"Bearer {run['claim_token']}"}, {"Authorization": ""}):
+        assert client.post(f"/tasks/{task['id']}/checks", json=body, headers=headers).status_code == 401
+    as_agent = client.post(f"/tasks/{task['id']}/checks", headers={"Authorization": ""},
+                           json={**body, "run_id": run["id"], "claim_token": run["claim_token"]})
+    assert as_agent.status_code == 401  # the agent's write form is not accepted on this route
+    assert client.get(f"/tasks/{task['id']}").json()["runs"][0]["checks"][0]["state"] == "missing"
+
+
+@pytest.mark.parametrize("body", [
+    {"name": "review", "commit": "c" * 40},                            # no note
+    {"name": "review", "commit": "c" * 40, "note": ""},
+    {"name": "review", "commit": "c" * 12, "note": "short sha"},
+    {"name": "review", "commit": "c" * 40, "note": "x", "status": "failed"},
+])
+def test_check_body_is_validated(client: TestClient, body: dict) -> None:
+    authorize(client)
+    task, _ = _review_with_checks(client, ["review"])
+    assert client.post(f"/tasks/{task['id']}/checks", json=body).status_code == 422
+
+
+def test_a_bad_required_check_name_is_422(client: TestClient) -> None:
+    authorize(client)
+    response = client.post("/tasks", json={"repo": "r", "title": "t", "required_checks": ["Not A Name"]})
+    assert response.status_code == 422 and "is not a check name" in response.json()["detail"]
+
+
+# -- lost tests (verification gates U3) ------------------------------------------
+
+def test_a_result_carries_lost_tests_and_the_accept_waits(client: TestClient) -> None:
+    authorize(client)
+    response = client.post("/tasks", json={"repo": "repo-a", "title": "Guarded", "brief": "do it",
+                                           "acceptance": ["true"], "regression_guard": True})
+    task = response.json()
+    assert task["regression_guard"] is True
+    ready(client, task["id"])
+    run = claim(client, task["id"]).json()
+    client.post(f"/runs/{run['id']}/start", json={"claim_token": run["claim_token"], "base_commit": "a" * 40,
+                                                  "branch": "b", "worktree": "/x"})
+    bad = client.post(f"/runs/{run['id']}/result", json={
+        "claim_token": run["claim_token"], "status": "review", "report": "ok", "result_commit": "c" * 40,
+        "test_changes": [{"test": "t::a", "after": "vanished"}]})
+    assert bad.status_code == 422
+    posted = client.post(f"/runs/{run['id']}/result", json={
+        "claim_token": run["claim_token"], "status": "review", "report": "ok", "result_commit": "c" * 40,
+        "verdict": "pass", "test_changes": [{"test": "t::a", "after": "missing"}]})
+    assert posted.status_code == 200 and posted.json()["test_changes"] == [{"test": "t::a", "after": "missing"}]
+    refused = client.post(f"/tasks/{task['id']}/accept")
+    assert refused.status_code == 409 and refused.json()["detail"] == "required checks missing: test-changes"
+
+
+def test_requests_retained_read_auth_full_body_and_scopes_boundary(client: TestClient, store: Store) -> None:
+    sender, recipient = make_run(client, "retained-sender"), make_run(client, "retained-recipient")
+    sr, rr = sender["run"], recipient["run"]
+    row = store.create_intent(sender["task"]["id"], sr["id"], sr["claim_token"], kind="request",
+                              to_task_id=recipient["task"]["id"], body="complete:" + "z" * 4400)
+    store.ack_intent(row["id"], rr["id"], rr["claim_token"], source="cli")
+    del client.headers["Authorization"]
+    payload = {"claim_token": rr["claim_token"], "known_ids": [row["id"], row["id"], "missing"]}
+    before = store.get_intent(row["id"])
+    log = store.runs_path.read_bytes()
+    events = store.read_run_events(rr["id"])
+    response = client.post(f"/runs/{rr['id']}/requests", json=payload)
+    assert response.status_code == 200, response.text
+    assert response.json()["pending_requests"] == []
+    assert response.json()["retained_requests"] == [before]
+    assert store.get_intent(row["id"]) == before and store.runs_path.read_bytes() == log
+    assert store.read_run_events(rr["id"]) == events
+    assert client.post(f"/runs/{sr['id']}/requests", json={
+        "claim_token": sr["claim_token"], "known_ids": [row["id"]]}).json()["retained_requests"] == []
+    assert client.post(f"/runs/{rr['id']}/requests", json={**payload, "claim_token": "wrong"}).status_code == 409
+    assert client.post(f"/runs/{rr['id']}/scopes", json=payload).status_code == 422
+    store.finish_run(rr["id"], rr["claim_token"], status="failed", error="fixture")
+    assert client.post(f"/runs/{rr['id']}/requests", json=payload).status_code == 409
+
+
+@pytest.mark.parametrize("ids", [None, "", [""], [1], [True], ["x" * 129], ["x"] * 21])
+def test_requests_rejects_invalid_retained_ids(client: TestClient, ids) -> None:
+    assert client.post("/runs/unused/requests", json={"claim_token": "unused", "known_ids": ids}).status_code == 422
+
+
+# -- honest receipts (SU3): the receipt route and the explicit-only ack route --------
+
+def test_receipt_route_records_prepared_and_never_an_acknowledgement(client: TestClient) -> None:
+    sender = make_run(client, "repo-receipt-a")
+    recipient = make_run(client, "repo-receipt-b")
+    cred = {"run_id": recipient["run"]["id"], "claim_token": recipient["run"]["claim_token"]}
+    intent = client.post(f"/tasks/{sender['task']['id']}/intents", json={
+        "run_id": sender["run"]["id"], "claim_token": sender["run"]["claim_token"],
+        "to_task_id": recipient["task"]["id"], "body": "hello"}).json()
+    assert [r["stage"] for r in intent["receipts"]] == ["stored"]
+    del client.headers["Authorization"]
+    prepared = client.post(f"/intents/{intent['id']}/receipt", json={**cred, "stage": "prepared", "source": "hook"})
+    assert prepared.status_code == 200, prepared.text
+    row = prepared.json()
+    assert row["state"] == "prepared" and row["acked_at"] is None
+    assert [(r["stage"], r["actor"], r["source"]) for r in row["receipts"]] == [
+        ("stored", "bus", "store"), ("prepared", "helper", "hook")]
+    # Prepared once: the row has left the queue for good, however much time passes.
+    pending = client.post(f"/runs/{recipient['run']['id']}/requests", json={"claim_token": cred["claim_token"]})
+    assert pending.json()["pending_requests"] == []
+    # The old delivery route and the old ack body are gone, not silently accepted.
+    assert client.post(f"/intents/{intent['id']}/delivered", json={**cred, "via": "socket"}).status_code in (404, 405)
+    assert client.post(f"/intents/{intent['id']}/ack", json=cred).status_code == 422
+    assert client.post(f"/intents/{intent['id']}/receipt", json={**cred, "stage": "included", "source": "hook"}).status_code == 422
+    assert client.post(f"/intents/{intent['id']}/receipt", json={**cred, "stage": "acknowledged", "source": "hook"}).status_code == 422
+    assert client.post(f"/intents/{intent['id']}/receipt", json={**cred, "stage": "prepared", "source": "socket"}).status_code == 422
+    acked = client.post(f"/intents/{intent['id']}/ack", json={**cred, "source": "cli"})
+    assert acked.status_code == 200, acked.text
+    assert [r["stage"] for r in acked.json()["receipts"]] == ["stored", "prepared", "acknowledged"]
+    assert acked.json()["receipts"][-1]["actor"] == "agent"
+    assert client.post(f"/intents/{intent['id']}/ack", json={**cred, "source": "hook"}).status_code == 422
+
+
+def test_receipt_route_accepts_owner_queue_queued_then_prepared_and_keeps_stored_until_prepared(
+        client: TestClient) -> None:
+    sender = make_run(client, "repo-oq-a")
+    recipient = make_run(client, "repo-oq-b")
+    cred = {"run_id": recipient["run"]["id"], "claim_token": recipient["run"]["claim_token"]}
+    intent = client.post(f"/tasks/{sender['task']['id']}/intents", json={
+        "run_id": sender["run"]["id"], "claim_token": sender["run"]["claim_token"],
+        "to_task_id": recipient["task"]["id"], "body": "owner queue message"}).json()
+    del client.headers["Authorization"]
+
+    queued = client.post(f"/intents/{intent['id']}/receipt",
+                         json={**cred, "stage": "queued", "source": "owner_queue"})
+    assert queued.status_code == 200, queued.text
+    qrow = queued.json()
+    assert qrow["state"] == "stored" and qrow["delivered_at"] is None
+    assert [(r["stage"], r["actor"], r["source"]) for r in qrow["receipts"]] == [
+        ("stored", "bus", "store"), ("queued", "helper", "owner_queue")]
+    still_pending = client.post(f"/runs/{recipient['run']['id']}/requests",
+                                json={"claim_token": cred["claim_token"]}).json()["pending_requests"]
+    assert [r["id"] for r in still_pending] == [intent["id"]]
+
+    prepared = client.post(f"/intents/{intent['id']}/receipt",
+                           json={**cred, "stage": "prepared", "source": "owner_queue"})
+    assert prepared.status_code == 200, prepared.text
+    prow = prepared.json()
+    assert prow["state"] == "prepared" and prow["delivered_via"] == "owner_queue"
+    assert [(r["stage"], r["actor"], r["source"]) for r in prow["receipts"]] == [
+        ("stored", "bus", "store"), ("queued", "helper", "owner_queue"), ("prepared", "helper", "owner_queue")]
+    after_pending = client.post(f"/runs/{recipient['run']['id']}/requests",
+                                json={"claim_token": cred["claim_token"]}).json()["pending_requests"]
+    assert after_pending == []
+    assert client.post(f"/intents/{intent['id']}/receipt",
+                       json={**cred, "stage": "included", "source": "owner_queue"}).status_code == 422
+

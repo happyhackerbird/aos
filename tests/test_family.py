@@ -277,7 +277,7 @@ def test_cascade_on_cancel_hold_and_lease_sweep(client, store):
     assert store.get_run(live["id"])["status"] == "cancelled"
     assert store.get_task(unrelated["id"])["status"] == "backlog"
     events = store.read_run_events(live["id"])["events"]
-    assert events[-1]["payload"]["status"] == "cancelled"
+    assert [event for event in events if event["type"] == "status"][-1]["payload"]["status"] == "cancelled"
     records = [json.loads(line) for line in store.runs_path.read_text().splitlines()]
     records = [r for r in records if r["outcome"] == "task:cascade"]
     assert {r["receipt"]["task_id"] for r in records} == moved
@@ -632,3 +632,58 @@ def test_proposal_identity_serializes_concurrent_requests(client, store):
     assert sorted(r["repeated"] for r in results) == [False, True]
     records = [json.loads(line) for line in store.runs_path.read_text().splitlines()]
     assert sum(r["outcome"] == "task:proposed" for r in records) == 1
+
+
+def test_family_keeps_original_requester_when_replaced_after_authentication(client, store, monkeypatch):
+    parent, old = parent_run(client)
+    child = child_task(client, parent, old)
+    child_run = live_run(client, child["id"])
+    original = store.run_bound
+    replacement = []
+
+    def racing(run_id, token, **kwargs):
+        bound = original(run_id, token, **kwargs)
+        store.finish_run(old["id"], old["claim_token"], status="review", report="retiring")
+        store.requeue_task(parent["id"], "ready")
+        new = claim(client, parent["id"]).json()
+        store.start_run(new["id"], new["claim_token"], base_commit="a", branch="b", worktree="/new")
+        store.update_receiver(new["id"], new["claim_token"], action="receiving", owner="new", reason="native_start")
+        question = store.create_intent(child["id"], child_run["id"], child_run["claim_token"],
+                                       kind="request", to_task_id=parent["id"], body="new owner only")
+        replacement.append((new, question))
+        return bound
+
+    monkeypatch.setattr(store, "run_bound", racing)
+    response = family(client, old)
+    assert response.status_code == 200, response.text
+    assert response.json()["parent"]["run"]["id"] == old["id"]
+    assert response.json()["children"][0]["questions"] == []
+    new, question = replacement[0]
+    overview = store.family(parent["id"], max_live_per_repo=3)
+    assert overview["children"][0]["questions"][0]["id"] == question["id"]
+    assert question["to_run_id"] == new["id"]
+
+
+def test_submission_blocks_admission_without_ending_heartbeat_and_never_reopens(client, store):
+    parent, run = parent_run(client)
+    before = store.get_run(run["id"])
+    invalid = client.post(f"/runs/{run['id']}/submission", json={
+        "claim_token": run["claim_token"], "commit": "c" * 40, "report": "invalid",
+        "children": [{"task_id": "AO-999", "run_id": "AO-999-r1", "commit": "d" * 40}]})
+    assert invalid.status_code == 409
+    assert store.get_run(run["id"])["receiver_state"] == "receiving"
+    assert submit(client, run, []).status_code == 200
+    closed = store.get_run(run["id"])
+    assert closed["status"] == "running" and closed["receiver_state"] == "closing"
+    assert closed["receiver_opened_at"] == before["receiver_opened_at"]
+    row = store.create_operator_intent(to_task_id=parent["id"], body="late")
+    assert row["admission"] == "unavailable" and row["to_run_id"] == run["id"]
+    assert row["terminal_reason"] and row["terminal_at"]
+    assert submit(client, run, []).json()["repeated"] is True
+    heartbeat = store.heartbeat_run(run["id"], run["claim_token"], lease_seconds=3600)
+    assert heartbeat["status"] == "running" and heartbeat["receiver_state"] == "closing"
+    store.update_receiver(run["id"], run["claim_token"], action="closed", reason="native_end")
+    assert store.get_run(run["id"])["receiver_reason"] == closed["receiver_reason"]
+    reopened = client.post(f"/runs/{run['id']}/receiver", json={
+        "claim_token": run["claim_token"], "action": "receiving", "owner": "replacement", "reason": "native_start"})
+    assert reopened.status_code == 409

@@ -2,8 +2,14 @@
 """aos-agent: the in-sandbox side of agents that talk (agent-comms U2).
 
 One standard-library file, installed in the harness image as /usr/local/bin/aos-agent.
-Six entry points: mcp (mode-filtered MCP tools), inbox --hook (automatic delivery),
-stop --hook (one finalization opportunity per run), version, summary, and peek.
+Entry points: mcp (mode-filtered MCP tools), inbox --hook (automatic delivery),
+stop --hook (one finalization opportunity), receiver-start/end --hook, version, summary, and peek.
+
+Honest receipts (SU3): every automatic path -- inbox tool, PostToolUse hook, wait result,
+interactive inbox wait -- PREPARES a message into the model's context and reports exactly
+that to the bus (`prepared`, with its source). Nothing here acknowledges: the agent's reply
+is its explicit act, recorded by the bus. A message is prepared once and leaves the queue,
+as a Claude Code user message is shown once at a turn boundary.
 
 It reads the run credential from /sandbox/aos-run.json (or AOS_AGENT_RUN_FILE): run_id,
 task_id, claim_token, bus_url. The claim token is never printed, logged or returned.
@@ -44,17 +50,17 @@ WAIT_MAX = 900
 LEDGER_BODY_CHARS = 200
 LEDGER_LINE_BYTES = 512  # U2 S3: one event per line, each under 512 bytes as encoded (fix lane 1 X8)
 PROTOCOL_VERSION_DEFAULT = "2025-06-18"
-AOS_AGENT_PROTOCOL = "2.2"
+AOS_AGENT_PROTOCOL = "2.6"
 WAIT_POLL = 3.0
 WAIT_SLICE = 0.25
 FAMILY_TIMEOUT = 5.0
 INTERACTIVE_TOOLS = ("aos_inbox_wait", "aos_family", "aos_import", "aos_export_candidate")
-WAIT_NOTE = "[aos] Returned without acknowledgement: these messages are delivered again at your next tool result or aos_inbox call."
-OPEN_HEADER = "Acknowledged and not yet answered:"
+WAIT_NOTE = "[aos] Returned by the wait; answer a request with aos_reply."
+OPEN_HEADER = "Delivered to you and not yet answered:"
 _PENDING: queue.Queue = queue.Queue()
 _EOF = threading.Event()
 _STDOUT_LOCK = threading.Lock()
-ACK_NOTE = "[aos] Acknowledgements are best-effort; messages may be delivered again."
+ACK_NOTE = "[aos] Delivery is best-effort: a message may be delivered again. Answer a request with aos_reply."
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 TASK_ID_RE = re.compile(r"^AO-\d+$")
 RUN_ID_RE = re.compile(r"^AO-\d+-r\d+$")
@@ -80,12 +86,14 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "aos_inbox",
-        "description": "Read messages addressed to your task. Reading acknowledges them.",
+        "description": ("Read messages addressed to your task. Reading does not acknowledge them; "
+                        "answer a request with aos_reply."),
         "inputSchema": {"type": "object", "additionalProperties": False, "properties": {}, "required": []},
     },
     {
         "name": "aos_wait",
-        "description": "Wait for the answer to a request you sent (at most 15 minutes per call).",
+        "description": ("Wait for an answer or unrelated incoming questions/notices (at most 15 minutes). "
+                        "An incoming return leaves the original request open; wait again with the same id."),
         "inputSchema": {"type": "object", "additionalProperties": False,
                         "properties": {"id": {"type": "string", "description": "the request id aos_ask returned"},
                                        "timeout_s": {"type": "integer", "description": "seconds to wait, 1 to 900 (default 900)"}},
@@ -141,8 +149,7 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "aos_inbox_wait",
-        "description": ("Wait for a message or a child notice; interactive-only. "
-                        "Returned messages are not acknowledged by the wait itself."),
+        "description": "Wait for a message or a child notice; interactive-only.",
         "inputSchema": {"type": "object", "additionalProperties": False,
                         "properties": {"timeout_s": {"type": "integer", "description": "seconds to wait for a message or a child notice, 1 to 900 (default 900); interactive runs only"}},
                         "required": []},
@@ -256,8 +263,11 @@ def load_run() -> dict[str, str] | None:
     run["bus_url"] = run["bus_url"].rstrip("/")
     if run["claim_token"] not in SECRETS:
         SECRETS.append(run["claim_token"])
-    if data.get("execution") == "interactive":
-        secrets = data.get("secrets")
+    # An interactive run must name its secrets. A headless run's are optional: only a Devin run has one, its worker key,
+    # which outlives the run as the claim token does not.
+    key = "secrets" if data.get("execution") == "interactive" else "headless_secrets"
+    if key == "secrets" or key in data:
+        secrets = data.get(key)
         if (not isinstance(secrets, list) or not secrets
                 or any(not isinstance(value, str) or not value for value in secrets)):
             return None
@@ -309,26 +319,47 @@ class Ledger:
                     yield event
 
     def _bounded_row(self, event: dict[str, Any]) -> None:
-        # Bound the ASCII-escaped encoding too, as the landed acked evidence does.
+        # Bound the ASCII-escaped encoding too, as the landed prepared evidence does.
         event["body"] = _scrub(str(event.get("body") or ""))[:LEDGER_BODY_CHARS]
         while event["body"] and len(json.dumps(event, separators=(",", ":")).encode("utf-8")) + 1 >= LEDGER_LINE_BYTES:
             event["body"] = event["body"][:-1]
         self.append(event)
 
-    def returned(self, row: dict[str, Any]) -> None:
-        self._bounded_row({"event": "returned", "id": row.get("id"), "kind": row.get("kind"),
-                           "from": row.get("task_id"), "body": row.get("body")})
-
-    def acked(self, row: dict[str, Any]) -> None:
-        event = {"event": "acked", "id": row.get("id"), "kind": row.get("kind"), "from": row.get("task_id"),
-                 "reply_to": row.get("reply_to"), "body": row.get("body")}
+    def prepared(self, row: dict[str, Any], source: str) -> None:
+        """Local evidence that this process wrote the frame into the model's context by
+        `source`. It is not an acknowledgement and not proof the model read it."""
+        event = {"event": "prepared", "id": row.get("id"), "kind": row.get("kind"), "from": row.get("task_id"),
+                 "reply_to": row.get("reply_to"), "source": source, "body": row.get("body")}
         self._bounded_row(event)
+
+    def wait_candidates(self) -> list[str]:
+        """Oldest prepared IDs not yet replied to, returned by a wait, or retired.
+
+        The caller's invocation deadline bounds the complete history scan. Bodies in
+        this ledger are only previews: recover complete content from the Store.
+        """
+        prepared: dict[str, None] = {}
+        disposed: set[str] = set()
+        for event in self.events():
+            intent_id = event.get("id")
+            if not isinstance(intent_id, str):
+                continue
+            if event.get("event") == "prepared":
+                prepared.setdefault(intent_id, None)
+            elif event.get("event") in ("replied", "wait_returned", "wait_retired"):
+                disposed.add(intent_id)
+        return [value for value in prepared if value not in disposed][:20]
+
 
 
 # -- the bus ---------------------------------------------------------------------------
 
 class BusError(Exception):
     pass
+
+
+class WaitError(Exception):
+    """An already framed specific-wait failure, preserving observed payloads."""
 
 
 def _refuse_protected(field: str, value: Any) -> None:
@@ -348,6 +379,7 @@ class Bus:
         self.run, self.timeout = run, timeout
         self.deadline: float | None = None
         self.deliveries: list[dict[str, Any]] | None = None
+        self.wait_returned_ids: list[str] = []
 
     def post(self, path: str, body: dict[str, Any], timeout: float | None = None) -> Any:
         scrubbed = {}
@@ -413,12 +445,18 @@ class Bus:
         return self.post(f"/tasks/{self._seg(self.run['task_id'])}/intents",
                          {**self.credential(), "reply_to": intent_id, "body": text})
 
-    def inbox(self) -> dict[str, Any]:
-        return self.post(f"/runs/{self._seg(self.run['run_id'])}/requests", {"claim_token": self.run["claim_token"]})
+    def inbox(self, known_ids: list[str] | None = None, timeout: float | None = None) -> dict[str, Any]:
+        data = self.post(f"/runs/{self._seg(self.run['run_id'])}/requests",
+                         {"claim_token": self.run["claim_token"], "known_ids": known_ids or []},
+                         timeout=timeout)
+        if not isinstance(data, dict) or not isinstance(data.get("retained_requests"), list):
+            raise BusError("bus unreachable: invalid retained_requests response")
+        return data
 
-    def ack(self, intent_id: str) -> dict[str, Any]:
+    def receipt(self, intent_id: str, stage: str, source: str) -> dict[str, Any]:
         _refuse_protected("id", intent_id)
-        return self.post(f"/intents/{self._seg(intent_id)}/ack", self.credential())
+        return self.post(f"/intents/{self._seg(intent_id)}/receipt",
+                         {**self.credential(), "stage": stage, "source": source})
 
     def wait(self, intent_id: str, timeout: int) -> dict[str, Any]:
         _refuse_protected("id", intent_id)
@@ -460,6 +498,11 @@ class Bus:
                          {"claim_token": self.run["claim_token"], "report": report,
                           "commit": commit, "children": children})
 
+    def receiver(self, action: str, owner: str, reason: str) -> dict[str, Any]:
+        return self.post(f"/runs/{self._seg(self.run['run_id'])}/receiver",
+                         {"claim_token": self.run["claim_token"], "action": action,
+                          "owner": owner, "reason": reason})
+
 
 # -- tools ------------------------------------------------------------------------------
 
@@ -472,67 +515,74 @@ def _text(arguments: dict[str, Any], name: str, *, required: bool = True) -> str
     return value
 
 
+def admission_text(row: dict[str, Any]) -> str:
+    if row.get("admission") == "accepted" and not row.get("terminal_reason"):
+        return f"{row['id']} accepted for {row.get('to_run_id') or row.get('to_task_id')}"
+    return (f"{row['id']} retained {row.get('admission') or 'legacy'}; "
+            f"attempted run={row.get('to_run_id')}; reason={row.get('terminal_reason')}; "
+            f"terminal_at={row.get('terminal_at')}")
+
+
 def tool_ask(bus: Bus, ledger: Ledger, arguments: dict[str, Any]) -> str:
     to, text = _text(arguments, "to"), _text(arguments, "text")
     row = bus.ask(to, text)
-    return f"sent {row['id']} to {to}"
+    return admission_text(row)
 
 
 def tool_reply(bus: Bus, ledger: Ledger, arguments: dict[str, Any]) -> str:
     intent_id, text = _text(arguments, "id"), _text(arguments, "text")
     _refuse_protected("reply_to", intent_id)
-    bus.ack(intent_id)  # idempotent for an acknowledged or answered row; any other error is the error
-    row = bus.reply(intent_id, text)
+    row = bus.reply(intent_id, text)  # the answer is the explicit act; the bus records it as such
     ledger.append({"event": "replied", "id": intent_id})
-    return f"replied to {intent_id} ({row['id']})"
+    return f"answer recorded for {intent_id}; reply {admission_text(row)}"
 
 
-def _ack_rows(bus: Bus, ledger: Ledger, rows: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
-    """Keep finalization evidence before any possibly committed acknowledgement."""
-    texts, acked = [], []
+def _prepare_rows(bus: Bus, ledger: Ledger, rows: list[dict[str, Any]], source: str) -> tuple[list[str], list[str]]:
+    """Keep local evidence before any possibly committed receipt report."""
+    texts, reported = [], []
     for row in rows:
         framed = str(row.get("framed") or row.get("body") or "")
         if bus.deliveries is not None:
             bus.deliveries.append(row)
             texts.append(framed)
             continue
-        ledger.acked(row)
+        ledger.prepared(row, source)
         if bus.deadline is not None and time.monotonic() >= bus.deadline:
-            texts.append(f"{framed}\n(ack skipped: invocation deadline reached; may be delivered again)")
+            texts.append(f"{framed}\n(receipt skipped: invocation deadline reached; may be delivered again)")
             continue
         try:
-            bus.ack(row["id"])
+            bus.receipt(row["id"], "prepared", source)
         except (BusError, KeyError) as exc:
-            texts.append(f"{framed}\n(ack failed for {row.get('id')}: {exc}; may be delivered again)")
+            texts.append(f"{framed}\n(receipt failed for {row.get('id')}: {exc}; may be delivered again)")
             continue
-        acked.append(row["id"])
+        reported.append(row["id"])
         texts.append(framed)
-    return texts, acked
+    return texts, reported
 
 
-def finish_delivery(bus: Bus, ledger: Ledger, rows: list[dict[str, Any]]) -> None:
-    """Called only after stdout flush: output, ledger, then best-effort bus ack.
+def finish_prepared(bus: Bus, ledger: Ledger, rows: list[dict[str, Any]], source: str) -> None:
+    """Called only after stdout flush: output, ledger, then best-effort `prepared` receipt.
 
-    An ack response may be lost after commit. The ledger deliberately records that
-    uncertainty as finalization evidence, not proof of model delivery or bus state.
+    A receipt response may be lost after commit. The ledger records that this process
+    wrote the frames out, not that the model read them and not the bus's state.
     """
     for row in rows:
-        ledger.acked(row)
+        ledger.prepared(row, source)
     for row in rows:
         if bus.deadline is not None and time.monotonic() >= bus.deadline:
-            log("ack skipped: invocation deadline reached; messages may be delivered again")
+            log("receipt skipped: invocation deadline reached; messages may be delivered again")
             break
         try:
-            bus.ack(row["id"])
+            bus.receipt(row["id"], "prepared", source)
         except (BusError, KeyError) as exc:
-            log(f"ack failed: {exc}; messages may be delivered again")
+            log(f"receipt failed: {exc}; messages may be delivered again")
 
 
 def tool_inbox(bus: Bus, ledger: Ledger, arguments: dict[str, Any]) -> str:
     data = bus.inbox()
     rows = data.get("pending_requests") or [] if isinstance(data, dict) else []
     overlaps = [str(o) for o in (data.get("overlaps") or [])] if isinstance(data, dict) else []
-    texts, _ = _ack_rows(bus, ledger, rows)
+    texts, _ = _prepare_rows(bus, ledger, rows, "inbox_tool")
     parts = texts + overlaps
     text = "\n\n".join(parts) if parts else "inbox empty"
     if bus.deliveries:
@@ -542,6 +592,7 @@ def tool_inbox(bus: Bus, ledger: Ledger, arguments: dict[str, Any]) -> str:
 
 def tool_wait(bus: Bus, ledger: Ledger, arguments: dict[str, Any]) -> str:
     intent_id = _text(arguments, "id")
+    _refuse_protected("id", intent_id)
     raw = arguments.get("timeout_s", WAIT_DEFAULT)
     try:
         budget = int(raw)
@@ -549,35 +600,133 @@ def tool_wait(bus: Bus, ledger: Ledger, arguments: dict[str, Any]) -> str:
         raise ValueError("'timeout_s' must be an integer number of seconds")
     budget = max(1, min(budget, WAIT_MAX))
     deadline = time.monotonic() + budget
-    # A caller-wide deadline stays in force: the earlier one wins. The deadline stays set after
-    # return, so finish_delivery's post-output acks of the replies remain inside the budget.
-    bus.deadline = deadline if bus.deadline is None else min(bus.deadline, deadline)
+    source = "caller" if bus.deadline is not None and bus.deadline < deadline else "wait"
+    deadline = min(deadline, bus.deadline) if bus.deadline is not None else deadline
+    bus.deadline = deadline  # Also bounds post-output best-effort bus work.
     state = "unknown"
-    while True:
-        if superseded():
-            return "wait superseded by a newer call"
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        started = time.monotonic()
-        # AO-23: the bus holds a wait up to one re-read past `timeout`, so ask it to return
-        # WAIT_MARGIN before the budget ends; a hold that reached the budget itself was cut by the
-        # invocation deadline and surfaced as `bus unreachable` on a healthy, unanswered bus.
-        # F99: the hold is capped at WAIT_POLL so a supersession (a newer call, EOF) is noticed
-        # within one poll; the bus re-reads every second itself.
-        hold = int(min(WAIT_POLL, max(0.0, remaining - WAIT_MARGIN)))
-        data = bus.wait(intent_id, hold)
-        intent = data.get("intent") if isinstance(data, dict) else None
-        state = str((intent or {}).get("state") or "unknown")
+    intent: dict[str, Any] = {}
+    replies: dict[str, dict[str, Any]] = {}
+    pending: dict[str, dict[str, Any]] = {}
+    recovered: dict[str, dict[str, Any]] = {}
+    in_flight = False
+
+    def control() -> str | None:
+        return "eof" if _EOF.is_set() else "superseded" if not _PENDING.empty() else None
+
+    def eligible(row: dict[str, Any]) -> bool:
+        return (row.get("admission") == "accepted"
+                and row.get("to_run_id") == bus.run["run_id"]
+                and row.get("kind") in ("request", "notice")
+                and not row.get("terminal_reason")
+                and row.get("state") in ("stored", "prepared", "acknowledged"))
+
+    def observed() -> str | None:
         if state == "answered":
-            replies = [r for r in (data.get("replies") or []) if isinstance(r, dict)]
-            texts, _ = _ack_rows(bus, ledger, replies)
-            return "\n\n".join(texts) if texts else f"{intent_id} is answered (no reply rows returned)"
-        if time.monotonic() - started < 1:
-            # The bus answered at once (a short hold, a test double or a bus that does not
-            # long-poll): do not spin.
-            time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
-    return f"no answer to {intent_id} after {budget} s (state {state})"
+            return "answered"
+        if intent.get("terminal_reason") or state in ("expired", "undeliverable", "unavailable"):
+            return "terminal"
+        return "incoming" if pending or recovered else None
+
+    def finish(outcome: str, explanation: str, *, error: bool = False) -> str:
+        rows = {key: row for key, row in replies.items() if eligible(row)}
+        rows.update({key: row for key, row in pending.items() if key not in rows})
+        rows.update({key: row for key, row in recovered.items() if key not in rows})
+        header = {"request_id": intent_id, "outcome": outcome, "target_state": state,
+                  "deadline_source": source, "remaining_s": max(0.0, deadline - time.monotonic()),
+                  "control": control()}
+        if error:
+            texts = [str(row.get("framed") or row.get("body") or "") for row in rows.values()]
+        else:
+            texts, _ = _prepare_rows(bus, ledger, list(rows.values()), "wait_tool")
+            bus.wait_returned_ids = list(rows)
+        texts.extend(admission_text(row) for key, row in replies.items() if key not in rows)
+        if observed() == "terminal":
+            texts.insert(0, admission_text(intent))
+        text = "aos_wait " + json.dumps(header, separators=(",", ":")) + "\n" + explanation
+        if texts:
+            text += "\n\n" + "\n\n".join(texts)
+        if error:
+            raise WaitError(text)
+        return text
+
+    def read_target() -> None:
+        nonlocal state, intent, in_flight
+        in_flight = True
+        data = bus.wait(intent_id, 0)
+        in_flight = False
+        intent = data.get("intent") or {}
+        state = str(intent.get("state") or "unknown")
+        if state == "answered":
+            for row in data.get("replies") or []:
+                if isinstance(row, dict) and isinstance(row.get("id"), str):
+                    replies[row["id"]] = row
+
+    try:
+        with invocation_deadline(deadline):
+            ledger.append({"event": "tool", "name": "aos_wait"})
+            while True:
+                current_control = control()
+                if current_control:
+                    return finish(current_control, "Wait ended before further network work; re-wait with the original id.")
+                started = time.monotonic()
+                candidates = ledger.wait_candidates()
+                read_target()
+                # Always read the companion inbox, then stabilize discovery after
+                # every complete response. Hook ACKs can land during either read.
+                while True:
+                    in_flight = True
+                    data = bus.inbox(candidates, timeout=WAIT_POLL)
+                    in_flight = False
+                    retained = {row["id"]: row for row in data["retained_requests"]
+                                if isinstance(row, dict) and isinstance(row.get("id"), str)}
+                    for row in data.get("pending_requests") or []:
+                        if (isinstance(row, dict) and isinstance(row.get("id"), str)
+                                and eligible(row) and len(pending) < 20):
+                            pending.setdefault(row["id"], row)
+                    for value in candidates:
+                        row = retained.get(value)
+                        if (row is not None and eligible(row) and value not in pending
+                                and value not in replies and len(recovered) < 20):
+                            recovered.setdefault(value, row)
+                    # Capture first: even a retirement write failure must retain
+                    # every complete observation in the local-error result.
+                    for value in candidates:
+                        row = retained.get(value)
+                        if row is None or not eligible(row):
+                            reason = ("terminal" if row and row.get("terminal_reason")
+                                      else "answered" if row and row.get("state") == "answered"
+                                      else "unavailable")
+                            ledger.append({"event": "wait_retired", "id": value, "reason": reason})
+                    fresh = ledger.wait_candidates()
+                    captured = replies.keys() | pending.keys() | recovered.keys()
+                    candidates = [value for value in fresh if value not in captured][:20 - len(recovered)]
+                    if not candidates:
+                        break
+                if observed() == "incoming":
+                    read_target()  # One bounded zero-hold tie recheck.
+                outcome = observed()
+                if outcome:
+                    return finish(outcome, "Observed target and incoming work; the original request id is unchanged.")
+                current_control = control()
+                if current_control:
+                    return finish(current_control, "Wait ended; re-wait with the original id.")
+                sleep_until = min(deadline, started + WAIT_POLL)
+                while time.monotonic() < sleep_until:
+                    current_control = control()
+                    if current_control:
+                        return finish(current_control, "Wait ended; re-wait with the original id.")
+                    time.sleep(min(WAIT_SLICE, max(0.0, sleep_until - time.monotonic())))
+                if time.monotonic() >= deadline:
+                    return finish("timeout", "No answer or incoming work before the effective deadline.")
+    except BusError as exc:
+        return finish("transport_error", f"{exc}; operation incomplete, server outcome unknown.", error=True)
+    except TimeoutError:
+        if in_flight:
+            return finish("transport_error", "bus unreachable: invocation deadline reached; "
+                          "operation incomplete, server outcome unknown.", error=True)
+        return finish(observed() or "timeout", "Effective deadline reached; companion observation may be incomplete.")
+    except OSError as exc:
+        return finish("local_error", f"Local ledger I/O failed: {exc}", error=True)
 
 
 def tool_declare(bus: Bus, ledger: Ledger, arguments: dict[str, Any]) -> str:
@@ -668,10 +817,8 @@ def tool_inbox_wait(bus: Bus, ledger: Ledger, arguments: dict[str, Any]) -> str:
         data = bus.inbox()
         rows = data.get("pending_requests") or []
         if rows:
-            for row in rows:
-                ledger.returned(row)
-            frames = "\n\n".join(str(row.get("framed") or row.get("body") or "") for row in rows)
-            return frames + "\n\n" + WAIT_NOTE + "\n" + family_summary(bus) + open_block(ledger)
+            texts, _ = _prepare_rows(bus, ledger, rows, "inbox_wait_tool")
+            return "\n\n".join(texts) + "\n\n" + WAIT_NOTE + "\n" + family_summary(bus) + open_block(ledger)
         sleep_until = min(deadline, time.monotonic() + WAIT_POLL)
         while True:
             if superseded():
@@ -763,6 +910,8 @@ def tool_import(bus: Bus, ledger: Ledger, arguments: dict[str, Any]) -> str:
             f"merge refs/aos/imports/{values['task_id']} in /sandbox/repo")
 
 
+# The receipt source each delivering tool reports (SU3 D7a); the hook reports "hook".
+PREPARED_SOURCES = {"aos_inbox": "inbox_tool", "aos_wait": "wait_tool", "aos_inbox_wait": "inbox_wait_tool"}
 TOOL_FUNCTIONS = {"aos_ask": tool_ask, "aos_reply": tool_reply, "aos_inbox": tool_inbox,
                   "aos_wait": tool_wait, "aos_declare": tool_declare, "aos_propose": tool_propose,
                   "aos_submit": tool_submit, "aos_inbox_wait": tool_inbox_wait,
@@ -781,7 +930,8 @@ def run_tool(name: str, arguments: Any, emit: Any = None) -> dict[str, Any]:
     try:
         if run is not None:
             ledger = Ledger(run["run_id"])
-            ledger.append({"event": "tool", "name": name})
+            if name != "aos_wait":
+                ledger.append({"event": "tool", "name": name})
         function = TOOL_FUNCTIONS.get(name)
         if function is None:
             answer = result(f"unknown tool {name}", True)
@@ -797,10 +947,27 @@ def run_tool(name: str, arguments: Any, emit: Any = None) -> dict[str, Any]:
             if bus.deliveries and name != "aos_inbox":
                 text += "\n\n" + ACK_NOTE
             answer = result(text)
-    except BusError as exc:
+    except (BusError, WaitError) as exc:
         answer = result(str(exc), True)
     except (ValueError, KeyError, TypeError) as exc:
         answer = result(f"{name}: {exc}", True)
+    except OSError as exc:
+        if name == "aos_wait" and bus is not None:
+            try:
+                intent_id = _text(arguments or {}, "id")
+                _refuse_protected("id", intent_id)
+                budget = max(1, min(int((arguments or {}).get("timeout_s", WAIT_DEFAULT)), WAIT_MAX))
+                remaining = budget if bus.deadline is None else max(0.0, bus.deadline - time.monotonic())
+                header = {"request_id": intent_id, "outcome": "local_error", "target_state": "unknown",
+                          "deadline_source": "wait" if bus.deadline is None else "caller",
+                          "remaining_s": min(budget, remaining),
+                          "control": "eof" if _EOF.is_set() else "superseded" if not _PENDING.empty() else None}
+                answer = result("aos_wait " + json.dumps(header, separators=(",", ":"))
+                                + f"\nLocal ledger I/O failed: {exc}", True)
+            except (ValueError, TypeError, AttributeError) as invalid:
+                answer = result(f"{name}: {invalid}", True)
+        else:
+            answer = result(f"{name}: {type(exc).__name__}", True)
     except Exception as exc:
         log(f"{name} failed: {type(exc).__name__}")
         answer = result(f"{name}: {type(exc).__name__}", True)
@@ -810,7 +977,10 @@ def run_tool(name: str, arguments: Any, emit: Any = None) -> dict[str, Any]:
         emit(answer)
     if bus is not None and ledger is not None and bus.deliveries and not answer["isError"]:
         try:
-            finish_delivery(bus, ledger, bus.deliveries)
+            if name == "aos_wait" and emit is not None:
+                for intent_id in bus.wait_returned_ids:
+                    ledger.append({"event": "wait_returned", "id": intent_id})
+            finish_prepared(bus, ledger, bus.deliveries, PREPARED_SOURCES.get(name, "inbox_tool"))
         except Exception as exc:
             try:
                 log(f"post-output delivery bookkeeping failed: {type(exc).__name__}: {exc}; "
@@ -907,6 +1077,34 @@ def _hook_payload() -> dict[str, Any]:
     return payload
 
 
+def _hook_receiver(action: str) -> int:
+    payload = _hook_payload()
+    if payload.get("agent_id") is not None:
+        return 0
+    owner = payload.get("session_id")
+    if not isinstance(owner, str) or not owner.strip():
+        raise ValueError("root lifecycle requires session_id")
+    run = load_run()
+    if run is None:
+        raise ValueError(NO_CREDENTIAL)
+    reason = payload.get("reason") if action == "closed" else "native_start"
+    if action == "closed" and reason != "native_owner_replaced":
+        reason = "native_end"
+    result = Bus(run, 2.0).receiver(action, owner, reason)
+    if not isinstance(result, dict) or result.get("receiver_state") != action:
+        raise ValueError("receiver transition unconfirmed")
+    return 0
+
+
+def hook_receiver(action: str) -> int:
+    try:
+        with invocation_deadline(time.monotonic() + 2.0):
+            return _hook_receiver(action)
+    except Exception as exc:
+        log("receiver lifecycle failed: " + " ".join(_scrub(str(exc)).split())[:400])
+        return 1
+
+
 def _hook_inbox() -> int:
     """Print and flush every frame before recording evidence or attempting an ack."""
     started = time.monotonic()
@@ -938,7 +1136,7 @@ def _hook_inbox() -> int:
         texts = [str(row.get("framed") or row.get("body") or "") for row in rows]
         send({"hookSpecificOutput": {"hookEventName": "PostToolUse",
                                      "additionalContext": _scrub("\n\n".join(texts) + "\n\n" + ACK_NOTE)}})
-        finish_delivery(bus, ledger, rows)
+        finish_prepared(bus, ledger, rows, "hook")
     return 0
 
 
@@ -948,7 +1146,7 @@ def open_requests(ledger: Ledger) -> list[dict[str, Any]]:
     open_rows: list[dict[str, Any]] = []
     seen: set[str] = set()
     for event in events:
-        if event.get("event") != "acked" or event.get("reply_to") is not None or event.get("kind") == "notice":
+        if event.get("event") != "prepared" or event.get("reply_to") is not None or event.get("kind") == "notice":
             continue
         intent_id = event.get("id")
         if not isinstance(intent_id, str) or intent_id in replied or intent_id in seen:
@@ -968,7 +1166,7 @@ def open_block(ledger: Ledger) -> str:
 
 
 def _hook_stop() -> int:
-    """Stop: block once while an acknowledged question stays unanswered; no bus call, always exit 0.
+    """Stop: block once while a delivered question stays unanswered; no bus call, always exit 0.
     A finish notice needs no answer and never counts; an event without a kind (an older ledger) does."""
     payload = _hook_payload()
     if payload.get("agent_id") is not None or payload.get("stop_hook_active") is True:
@@ -988,7 +1186,7 @@ def _hook_stop() -> int:
                       for e in open_rows)
     # Lane B B3: after a Stop block, Claude's `result` carries only the continuation's text and the
     # runner records that as the run's report, so the agent is asked to restate the whole report.
-    send({"decision": "block", "reason": _scrub("Requests you acknowledged and have not answered:\n" + lines +
+    send({"decision": "block", "reason": _scrub("Requests delivered to you that you have not answered:\n" + lines +
                                            "\nAnswer each with aos_reply, or say in your report why you did not. "
                                            "Then end with your full final report again: your last message is the "
                                            "report this run records.")})
@@ -1041,7 +1239,7 @@ def summary() -> int:
         return 0
     hooks = calls = size = lines = 0
     tools = {name: 0 for name in ("aos_inbox", "aos_wait", "aos_ask", "aos_reply")}
-    acked: set[str] = set()
+    prepared: set[str] = set()
     replied: set[str] = set()
     blocked = False
     with handle:
@@ -1062,21 +1260,21 @@ def summary() -> int:
                 name = event.get("name")
                 if isinstance(name, str) and name in tools:
                     tools[name] += 1
-            elif kind in ("acked", "replied") and isinstance(event.get("id"), str):
-                (acked if kind == "acked" else replied).add(event["id"])
+            elif kind in ("prepared", "replied") and isinstance(event.get("id"), str):
+                (prepared if kind == "prepared" else replied).add(event["id"])
             elif kind == "stop_blocked":
                 blocked = True
     # IDs are diagnostic only: never print bodies, arbitrary control characters,
     # unbounded IDs, or the claim token (scrub before bounding).
     ids = []
-    for intent_id in sorted(acked)[:20]:
+    for intent_id in sorted(prepared)[:20]:
         safe = "".join(c if c.isascii() and (c.isalnum() or c in "-_.:") else "_" for c in _scrub(intent_id))
         ids.append(safe[:80])
-    if len(acked) > 20:
-        ids.append(f"+{len(acked) - 20} more")
+    if len(prepared) > 20:
+        ids.append(f"+{len(prepared) - 20} more")
     print(f"messaging: hook pulls {hooks}, mcp tool calls {calls} "
           f"(inbox {tools['aos_inbox']}, wait {tools['aos_wait']}, ask {tools['aos_ask']}, reply {tools['aos_reply']}), "
-          f"acknowledged {len(acked)} ({', '.join(ids)}), replied {len(replied)}, stop blocked {int(blocked)}, "
+          f"prepared {len(prepared)} ({', '.join(ids)}), replied {len(replied)}, stop blocked {int(blocked)}, "
           f"ledger {size} bytes {lines} lines")
     return 0
 
@@ -1096,6 +1294,137 @@ def peek() -> int:
     return 0
 
 
+def _owner_queue() -> int:
+    """SU4 D2a: fetch pending rows for the OMP owner queue, recording `queued` once per row
+    without marking anything `prepared`. Main-thread deadline bounds every bus and ledger call."""
+    run = load_run()
+    if run is None:
+        sys.stderr.write(NO_CREDENTIAL + "\n")
+        return 3
+    ledger = Ledger(run["run_id"])
+    already_queued: set[str] = set()
+    confirmed_prepared: set[str] = set()
+    for event in ledger.events():
+        intent_id = event.get("id")
+        if not isinstance(intent_id, str):
+            continue
+        kind = event.get("event")
+        if kind == "queued":
+            already_queued.add(intent_id)
+        elif kind == "prepared_bus" or (kind == "prepared" and event.get("source") != "owner_queue"):
+            confirmed_prepared.add(intent_id)
+    bus = Bus(run, HOOK_TIMEOUT)
+    data = bus.inbox()
+    if not isinstance(data, dict) or not isinstance(data.get("pending_requests"), list):
+        raise ValueError("invalid inbox response")
+    rows = data["pending_requests"]
+    messages: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("id"), str):
+            raise ValueError("invalid inbox row")
+        intent_id = row["id"]
+        if intent_id in confirmed_prepared:
+            continue
+        if intent_id not in already_queued:
+            bus.receipt(intent_id, "queued", "owner_queue")
+            ledger.append({"event": "queued", "id": intent_id, "source": "owner_queue"})
+            already_queued.add(intent_id)
+        messages.append({
+            "id": intent_id,
+            "kind": row.get("kind"),
+            "task_id": row.get("task_id"),
+            "reply_to": row.get("reply_to"),
+            "body": row.get("body"),
+            "framed": _scrub(str(row.get("framed") or row.get("body") or "")),
+        })
+    send({"messages": messages, "ack_note": _scrub(ACK_NOTE)})
+    return 0
+
+
+def owner_queue() -> int:
+    started = time.monotonic()
+    deadline = started + min(HOOK_DEADLINE, _env_seconds("AOS_AGENT_HOOK_DEADLINE", HOOK_DEADLINE))
+    try:
+        with invocation_deadline(deadline):
+            return _owner_queue()
+    except BusError as exc:
+        sys.stderr.write(_scrub(f"aos-agent: queue: {exc}\n"))
+        return 3
+    except Exception as exc:
+        sys.stderr.write(_scrub(f"aos-agent: queue: {type(exc).__name__}: {exc}\n"))
+        return 3
+
+
+def _hook_prepare() -> int:
+    """SU4 D3a: record `prepared` only when the native `context` event is observed."""
+    started = time.monotonic()
+    payload = _hook_payload()
+    if payload.get("agent_id") is not None:
+        send({"prepared_ids": []})
+        return 0
+    run = load_run()
+    if run is None:
+        raise ValueError(NO_CREDENTIAL)
+    rows = payload.get("messages")
+    if not isinstance(rows, list):
+        raise ValueError("prepare payload requires a messages list")
+    deadline = started + min(HOOK_DEADLINE, _env_seconds("AOS_AGENT_HOOK_DEADLINE", HOOK_DEADLINE))
+    ledger = Ledger(run["run_id"])
+    already_prepared: set[str] = set()
+    confirmed_bus: set[str] = set()
+    for event in ledger.events():
+        intent_id = event.get("id")
+        if not isinstance(intent_id, str):
+            continue
+        kind = event.get("event")
+        if kind == "prepared":
+            already_prepared.add(intent_id)
+            if event.get("source") != "owner_queue":
+                confirmed_bus.add(intent_id)
+        elif kind == "prepared_bus":
+            confirmed_bus.add(intent_id)
+    bus = Bus(run, HOOK_TIMEOUT)
+    bus.deadline = deadline
+    reported: list[str] = []
+    failed = False
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("id"), str) or not row["id"].strip():
+            continue
+        intent_id = row["id"]
+        if intent_id not in already_prepared:
+            ledger.prepared(row, "owner_queue")
+            already_prepared.add(intent_id)
+        if intent_id in confirmed_bus:
+            reported.append(intent_id)
+            continue
+        if bus.deadline is not None and time.monotonic() >= bus.deadline:
+            failed = True
+            log("receipt skipped: invocation deadline reached; messages may be delivered again")
+            break
+        try:
+            bus.receipt(intent_id, "prepared", "owner_queue")
+            ledger.append({"event": "prepared_bus", "id": intent_id})
+            confirmed_bus.add(intent_id)
+            reported.append(intent_id)
+        except (BusError, KeyError) as exc:
+            failed = True
+            log(f"receipt failed: {exc}; messages may be delivered again")
+    send({"prepared_ids": reported})
+    if failed:
+        return _hook_failure("prepare", RuntimeError("one or more prepared receipts were not confirmed"))
+    return 0
+
+
+def hook_prepare() -> int:
+    started = time.monotonic()
+    deadline = started + min(HOOK_DEADLINE, _env_seconds("AOS_AGENT_HOOK_DEADLINE", HOOK_DEADLINE))
+    try:
+        with invocation_deadline(deadline):
+            return _hook_prepare()
+    except Exception as exc:
+        return _hook_failure("prepare", exc)
+
+
 def main(argv: list[str]) -> int:
     if argv == ["mcp"]:
         return serve()
@@ -1103,6 +1432,12 @@ def main(argv: list[str]) -> int:
         return hook_inbox()
     if argv == ["stop", "--hook"]:
         return hook_stop()
+    if argv == ["prepare", "--hook"]:
+        return hook_prepare()
+    if argv == ["receiver-start", "--hook"]:
+        return hook_receiver("receiving")
+    if argv == ["receiver-end", "--hook"]:
+        return hook_receiver("closed")
     if argv == ["version"]:
         print(f"aos-agent protocol {AOS_AGENT_PROTOCOL}")
         return 0
@@ -1110,7 +1445,9 @@ def main(argv: list[str]) -> int:
         return summary()
     if argv == ["peek"]:
         return peek()
-    sys.stderr.write("usage: aos-agent mcp | aos-agent inbox --hook | aos-agent stop --hook | aos-agent version | aos-agent summary | aos-agent peek\n")
+    if argv == ["queue"]:
+        return owner_queue()
+    sys.stderr.write("usage: aos-agent mcp | aos-agent inbox --hook | aos-agent stop --hook | aos-agent prepare --hook | aos-agent receiver-start --hook | aos-agent receiver-end --hook | aos-agent version | aos-agent summary | aos-agent peek | aos-agent queue\n")
     return 2
 
 

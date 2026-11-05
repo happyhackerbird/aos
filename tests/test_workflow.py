@@ -143,17 +143,87 @@ def test_refusal_messages(text, message):
     assert str(info.value) == PREFIX + message
 
 
+def test_protected_and_watch_parse_as_stripped_patterns():
+    fields = parse_workflow('protected = [" tests/acceptance/** ", "tasks/", "scripts/check*.sh"]\n'
+                            'watch = ["uv.lock", "**/conftest.py"]\n')
+    assert fields["protected"] == ("tests/acceptance/**", "tasks/", "scripts/check*.sh")
+    assert fields["watch"] == ("uv.lock", "**/conftest.py")
+    absent = parse_workflow('test_command = "x"\n')
+    assert absent["protected"] == () and absent["watch"] == ()
+
+
+@pytest.mark.parametrize("key", ["protected", "watch"])
+@pytest.mark.parametrize("value, message", [
+    ("'tests/**'", "{key} must be a list of strings"),
+    ("['a', 3]", "{key} must be a list of strings"),
+    ("[]", "{key} is empty; omit the key for none"),
+    ("['ok', '  ']", "{key}[1] is blank"),
+    ('["a\\tb"]', "{key}[0] has a control character"),
+    ('["a\\u0007"]', "{key}[0] has a control character"),
+    ("['/etc/passwd']", "{key}[0] starts with /; patterns are relative to the repository root"),
+    ("[':(exclude)x']", "{key}[0] starts with :; pathspec magic is not accepted"),
+    ("['../other']", "{key}[0] has an empty, . or .. path component"),
+    ("['tests/../aos-policy.toml']", "{key}[0] has an empty, . or .. path component"),
+    ("['./tests']", "{key}[0] has an empty, . or .. path component"),
+    ("['tests//acceptance']", "{key}[0] has an empty, . or .. path component"),
+])
+def test_pattern_refusals(key, value, message):
+    with pytest.raises(WorkflowError) as info:
+        parse_workflow(f"{key} = {value}\n")
+    assert str(info.value) == PREFIX + message.format(key=key)
+
+
+def test_the_aos_files_are_always_locked(tmp_path):
+    assert workflow.locked_patterns() == ("aos-policy.toml", "aos-workflow.toml")
+    assert workflow.locked_patterns(("tests/**", "aos-policy.toml")) == ("aos-policy.toml", "aos-workflow.toml",
+                                                                        "tests/**")
+    repo = _repo(tmp_path)
+    _commit(repo, 'protected = ["tests/acceptance/**"]\nwatch = ["uv.lock"]\n')
+    result = read_workflow(str(repo), _default(repo))
+    assert result.protected == ("tests/acceptance/**",) and result.watch == ("uv.lock",)
+    assert workflow.locked_patterns(result.protected) == ("aos-policy.toml", "aos-workflow.toml",
+                                                          "tests/acceptance/**")
+
+
+def test_required_checks_parse_and_merge_with_the_task_list():
+    fields = parse_workflow('required_checks = ["merge-check", "review", "review"]\n')
+    assert fields["required_checks"] == ("merge-check", "review")
+    default = Default("local", "main", "a" * 40, "main@aaaaaaaaaaaa")
+    repo_workflow = workflow.Workflow(None, ("check",), None, "b" * 64, default.ref,
+                                      required_checks=fields["required_checks"])
+    snapshot = workflow.execution_snapshot({"acceptance": [], "required_checks": ["real-service", "review"]},
+                                           repo_workflow, default)
+    assert snapshot["required_checks"] == ["merge-check", "review", "real-service"]
+    bare = workflow.execution_snapshot({"acceptance": ["x"]}, None, default)
+    assert "required_checks" not in bare  # absent, so a bus without the field still takes the claim
+    only_task = workflow.execution_snapshot({"acceptance": ["x"], "required_checks": ["review"]}, None, default)
+    assert only_task["required_checks"] == ["review"]
+
+
+@pytest.mark.parametrize("value, message", [
+    ("'review'", "required_checks must be a list of strings"),
+    ("[]", "required_checks is empty; omit the key for none"),
+    ("['Review']", "required_checks[0] is not a check name ([a-z0-9][a-z0-9-]{0,39})"),
+    ("['ok', 'two words']", "required_checks[1] is not a check name ([a-z0-9][a-z0-9-]{0,39})"),
+    (str([f"c{i}" for i in range(21)]), "required_checks holds more than 20 names"),
+])
+def test_required_checks_refusals(value, message):
+    with pytest.raises(WorkflowError) as info:
+        parse_workflow(f"required_checks = {value}\n")
+    assert str(info.value) == PREFIX + message
+
+
 def test_tab_allowed_in_command_and_prompt():
-    tc, acc, prompt = parse_workflow('test_command = "a\\tb"\nacceptance = ["c\\td"]\nprompt = "e\\tf\\ng"\n')
-    assert (tc, acc, prompt) == ("a\tb", ("c\td",), "e\tf\ng")
+    fields = parse_workflow('test_command = "a\\tb"\nacceptance = ["c\\td"]\nprompt = "e\\tf\\ng"\n')
+    assert (fields["test_command"], fields["acceptance"], fields["prompt"]) == ("a\tb", ("c\td",), "e\tf\ng")
 
 
 def test_crlf_prompt_normalised():
-    assert parse_workflow('prompt = """\r\nline one\r\nline two\r\n"""\n')[2] == "line one\nline two"
+    assert parse_workflow('prompt = """\r\nline one\r\nline two\r\n"""\n')["prompt"] == "line one\nline two"
 
 
 def test_prompt_cap_is_bytes_not_characters():
-    assert parse_workflow(f'prompt = "{"é" * 2048}"\n')[2] == "é" * 2048
+    assert parse_workflow(f'prompt = "{"é" * 2048}"\n')["prompt"] == "é" * 2048
     with pytest.raises(WorkflowError) as info:
         parse_workflow(f'prompt = "{"é" * 2049}"\n')
     assert str(info.value) == PREFIX + "prompt is 4098 bytes; the cap is 4096"
@@ -230,3 +300,20 @@ def test_no_repo_or_task_checks_is_a_preflight_error():
     for repo_workflow in (None, workflow.Workflow(None, (), "instructions only", "b" * 64, default.ref)):
         with pytest.raises(WorkflowError):
             workflow.execution_snapshot({"acceptance": []}, repo_workflow, default)
+
+
+def test_baseline_key_is_a_boolean():
+    assert parse_workflow("baseline = true\n")["baseline"] is True
+    assert parse_workflow("baseline = false\n")["baseline"] is False
+    assert parse_workflow('test_command = "x"\n')["baseline"] is False
+    for value in ('"true"', "1", "[]"):
+        with pytest.raises(WorkflowError) as info:
+            parse_workflow(f"baseline = {value}\n")
+        assert str(info.value) == PREFIX + "baseline must be true or false"
+
+
+def test_test_changes_is_not_a_configurable_check():
+    with pytest.raises(WorkflowError) as info:
+        parse_workflow('required_checks = ["review", "test-changes"]\n')
+    assert str(info.value) == PREFIX + ("required_checks[1]: test-changes is added by AOS when tests are lost; "
+                                        "turn on baseline instead")

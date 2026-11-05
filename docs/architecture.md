@@ -81,6 +81,16 @@ host harness. Repository policy, worker credentials and operator plugins are
 separate inputs. Fresh acceptance receives the result tree without the job's
 harness authentication or run credential.
 
+The agent writes the work, never what counts as its proof. Policy and workflow are
+read from the default branch, so an edit on the task branch cannot change its own
+run. The [locked paths](reference/configuration.md#locked-paths-and-the-change-report)
+(`aos-policy.toml`, `aos-workflow.toml` and the repository's `protected` patterns)
+also cannot change through the result: a result that adds, changes or deletes one
+since the run's start is refused before acceptance, so it can neither steer that
+run's checks nor land on merge. A locked test can still be a weak test, and
+acceptance still runs code the agent wrote; the lock covers the files, not their
+strength.
+
 The runner checks effective sandbox policy and, when messaging is enabled,
 authenticated sandbox-to-bus reachability before starting the harness. A policy
 grant is not a guarantee that DNS, routing or the bus works.

@@ -102,7 +102,7 @@ gateway after any change to the Docker runtime.
 
 ## Build the harness image
 
-The image at `docker/harness/Dockerfile` pins Claude Code, Codex, Pi, omp, uv with
+The image at `docker/harness/Dockerfile` pins Claude Code, Codex, Pi, omp, Devin, uv with
 Python 3.12, Playwright's Chromium, PostgreSQL 15 and Chromium on a digest-pinned
 Node 24 base. Build it from the agent-os checkout on each worker host (on the Mac,
 with Colima as the Docker context):
@@ -120,7 +120,8 @@ Each harness gets one credential minted for the worker, never the operator's own
 login or credential store. In short: Claude Code uses a `claude setup-token` held by
 the OpenShell provider `aos-claude-oauth`; Codex uses a ChatGPT device-auth login
 minted inside a sandbox, whose `auth.json` the runner uploads per run and downloads
-again afterwards; Pi and omp use an exported `openai-codex` `auth.json`. The
+again afterwards; Pi and omp use an exported `openai-codex` `auth.json`; Devin uses a
+separate worker login's `credentials.toml`, uploaded per run. The
 commands are in [worker credentials](reference/openshell-backend-setup.md#worker-credentials-never-the-operators-own-stores);
 the Pi export and its renewal are in the
 [Pi adapter](pi-adapter.md#worker-auth-export-and-renewal). The Pi snapshot cannot
@@ -141,13 +142,16 @@ repository:
 | `AOS_OPENSHELL_PROVIDER_CLAUDE` | none | OpenShell provider for Claude Code, `aos-claude-oauth` |
 | `AOS_OPENSHELL_PROVIDER_HOSTS` | `api.anthropic.com` | hosts a provider credential binds; a repository policy may not grant them |
 | `AOS_OPENSHELL_CODEX_AUTH` | none, required for Codex | the worker Codex `auth.json` (mode 600) |
-| `AOS_OPENSHELL_HARNESS_HOSTS_CODEX`, `_PI` | none | harness API hosts as a `host:port` list. Codex: `chatgpt.com:443,auth.openai.com:443,ab.chatgpt.com:443`. Pi: must include `chatgpt.com:443` |
+| `AOS_OPENSHELL_DEVIN_AUTH` | none, required for Devin | the worker's Devin `credentials.toml` (mode 600) |
+| `AOS_OPENSHELL_DEVIN_MODEL` | none | model for Devin runs (`devin --model`); unset passes no `--model` |
+| `AOS_OPENSHELL_HARNESS_HOSTS_CODEX`, `_PI`, `_DEVIN` | none | harness API hosts as a `host:port` list. Codex: `chatgpt.com:443,auth.openai.com:443,ab.chatgpt.com:443`. Pi: must include `chatgpt.com:443`. Devin: must include `server.codeium.com:443` |
 | `AOS_OPENSHELL_PI_FLAVOUR` | `pi` | `pi` or `omp` |
 | `AOS_OPENSHELL_PI_BIN` | the flavour name | binary in the image |
 | `AOS_OPENSHELL_PI_PROVIDER` | `openai-codex` for `pi`; unset for `omp` | model provider |
 | `AOS_OPENSHELL_CLAUDE_MODEL` | Claude Code's default | model for Claude runs, passed as `claude --model`, for example `claude-opus-5-5` |
 | `AOS_OPENSHELL_PI_MODEL` | required for Pi | model name |
-| `AOS_OPENSHELL_PI_AUTH` | required for Pi | the exported worker `auth.json` |
+| `AOS_OPENSHELL_PI_AUTH` | this or `AOS_OPENSHELL_PI_LOGIN` for Pi | the exported worker `auth.json` |
+| `AOS_OPENSHELL_PI_LOGIN` | this or `AOS_OPENSHELL_PI_AUTH` for Pi | the worker's persistent omp login directory, renewed on the host before admission |
 | `AOS_OPENSHELL_PI_ACCOUNT_ID` | none | optional pinned worker `accountId` |
 | `AOS_OPENSHELL_CPU`, `AOS_OPENSHELL_MEMORY` | `2`, `2Gi` | sandbox resources |
 | `AOS_OPENSHELL_STATE_DIR` | `~/.aos/openshell` | per-run state: rendered policy, prompt, ownership marker |
@@ -155,12 +159,13 @@ repository:
 | `AOS_OPENSHELL_BUS_PORT` | the port of `AOS_URL` | bus port the sandbox policy allows |
 | `AOS_OPENSHELL_BUS_HOST` | `192.168.5.2` on `colima-mac`, `host.openshell.internal` on `linux` | the host the sandbox's bus rule and the run file's bus URL name (an IPv4 literal or one of those two aliases); on a Linux host with a firewall use the bus's published address, e.g. `172.17.0.1` or its Tailscale binding |
 | `AOS_HARNESS_TIMEOUT_SECONDS`, `AOS_ACCEPT_TIMEOUT_SECONDS` | `7200`, `900` | harness deadline and per-command acceptance timeout |
-| `AOS_OPENSHELL_FRESH_ACCEPTANCE` | `1` | acceptance in a new, credential-free sandbox; `0` runs it in the harness's sandbox (Pi ignores `0`) |
-| `AOS_OPENSHELL_BASELINE` | `0` | `1` runs the acceptance commands once BEFORE the agent, on the job tree in a fresh sandbox (`<name>-pre`), and the report compares each command's exit code before and after (fixed, regressed, still failing, unchanged); the verdict is unchanged; needs fresh acceptance; a per-run database is reset after the baseline |
-| `AOS_OPENSHELL_COMMS` | `1` | Claude, Codex, omp and native pi runs get the aos messaging tools (ask another task or the operator, reply, wait, propose a task); on Linux set `AOS_OPENSHELL_BUS_HOST` to an address a sandbox reaches (the alias is dropped by a host firewall), or `0`; `pull` keeps the tools but disables automatic AOS delivery and the final-turn hold, preserving operator plugins |
+| `AOS_OPENSHELL_FRESH_ACCEPTANCE` | `1` | acceptance in a new, credential-free sandbox; `0` runs it in the harness's sandbox (Pi and Devin ignore `0`) |
+| `AOS_OPENSHELL_BASELINE` | `0` | `1` runs the acceptance commands once BEFORE the agent, on the job tree in a fresh sandbox (`<name>-pre`), and the report compares each command's exit code before and after (fixed, regressed, still failing, unchanged), and test by test where the commands write JUnit XML to `$AOS_TEST_RESULTS`; the verdict is unchanged; needs fresh acceptance; a per-run database is reset after the baseline. A run whose every command already passes before the agent ends before the agent unless the task was added with `--regression-guard`. A repository can ask for the same per repository with `baseline = true` in `aos-workflow.toml` ([before and after](reference/configuration.md#before-and-after-the-agent)) |
+| `AOS_OPENSHELL_COMMS` | `1` | Claude, Codex, omp, native pi and Devin runs get the aos messaging tools (ask another task or the operator, reply, wait, propose a task); on Linux set `AOS_OPENSHELL_BUS_HOST` to an address a sandbox reaches (the alias is dropped by a host firewall), or `0`; `pull` keeps the tools but disables automatic AOS delivery and the final-turn hold, preserving operator plugins |
 | `AOS_GIT_NAME`, `AOS_GIT_EMAIL` | the host's git `user.name` and `user.email` for the repository | what an agent commits as (both or neither); with neither set anywhere, a run is refused before its claim |
 | `AOS_OPENSHELL_CLAUDE_PLUGINS` | none | comma list of Claude plugin directories shipped into every Claude run (skills, hooks, subagents) |
 | `AOS_OPENSHELL_CODEX_PLUGINS`, `AOS_OPENSHELL_PI_PLUGINS` | none | comma list of directories shipped into every Codex or Pi run: skills, a `hooks.json` (Codex), an extension (Pi) or agent roles; a `hooks.json` switches Codex hooks on, while subagents are on in every Codex and omp run, roles or not ([setup reference](reference/openshell-backend-setup.md)) |
+| `AOS_OPENSHELL_DEVIN_PLUGINS` | none | comma list of directories shipped into every Devin run: skills and agent profiles; a `hooks.json` in one refuses the run before its claim ([setup reference](reference/openshell-backend-setup.md)) |
 | `AOS_BACKEND` | `openshell` | only backend for both run and integration checks; leave unset |
 
 A Linux example for a Claude Code and Codex worker:
@@ -259,7 +264,9 @@ legacy registry migration](reference/configuration.md#repository-workflow-file).
 
 The harness receives the task title, brief, resolved checks and repository prompt, with
 the instruction to work only in the checkout, commit on the current branch, and
-stop and report when a path or host is denied.
+stop and report when a path or host is denied. Whether it also loads the repository's
+`AGENTS.md` or `CLAUDE.md` depends on the harness; see
+[Instruction files](reference/configuration.md#instruction-files).
 
 ## What a run leaves
 
@@ -299,11 +306,15 @@ By default the runner builds a new sandbox from the result commit, under the
 repository policy only (no harness hosts, no credential), and runs the acceptance
 commands there. That also discards processes the agent left behind, and the
 per-run database is reset before the commands start. `AOS_OPENSHELL_FRESH_ACCEPTANCE=0`
-runs acceptance in the sandbox the harness used instead; Pi and omp runs ignore it
-and are always fresh.
-With `AOS_OPENSHELL_BASELINE=1` the same commands run once before the agent in
+runs acceptance in the sandbox the harness used instead; Pi, omp and Devin runs ignore
+it and are always fresh.
+With `AOS_OPENSHELL_BASELINE=1` (or `baseline = true` in the repository's
+`aos-workflow.toml`) the same commands run once before the agent in
 a fresh `<name>-pre` sandbox; the database is reset after that run too, and the report
-carries a `baseline:` line per command and a `baseline summary:` line.
+carries a `baseline:` line per command, a `baseline summary:` line and a `test
+comparison:` line. Both sandboxes export `AOS_TEST_RESULTS`; JUnit XML written there
+is compared test by test, and tests that passed before and not after hold the accept
+until a reason is recorded ([before and after](reference/configuration.md#before-and-after-the-agent)).
 
 ## Try it with the example
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from agent_os.store import Store, TransitionError
+from agent_os.store import Store, TransitionError, format_receipts
 
 
 class OperatorChannel(Protocol):
@@ -33,10 +33,16 @@ def notice_text(intent: dict[str, Any]) -> str:
     """The notice for a swept row: a question to the operator, or a row nobody read in time."""
     if intent["notice"] == "operator":
         return (f"❓ {intent['task_id']} asks you ({intent['id']}):\n{intent['body'][:1500]}\n"
+                f"admission={intent.get('admission')} to_run_id={intent.get('to_run_id')} "
+                f"terminal_reason={intent.get('terminal_reason')} terminal_at={intent.get('terminal_at')}\n"
+                f"receipts=[{format_receipts(intent.get('receipts') or [])}]\n"
                 "Reply to this message to answer.")
     # The row's kind: a finish notice nobody read reaches the operator as a notice (lane F, G1).
     return (f"⚠️ {intent['kind']} {intent['id']} {intent['task_id']} -> {intent['to_task_id']} "
-            f"{intent['notice']}: {intent['body'][:200]}")
+            f"{intent['notice']}: {intent['body'][:200]} "
+            f"admission={intent.get('admission')} to_run_id={intent.get('to_run_id')} "
+            f"terminal_reason={intent.get('terminal_reason')} terminal_at={intent.get('terminal_at')} "
+            f"receipts=[{format_receipts(intent.get('receipts') or [])}]")
 
 
 def answer(store: Store, intent_id: str, text: str) -> str:
@@ -48,4 +54,6 @@ def answer(store: Store, intent_id: str, text: str) -> str:
         return f"{intent_id} not answered: {exc}"
     except ValueError as exc:
         return f"not sent: {exc}"
-    return f"answered {intent_id} ({row['id']})"
+    return (f"answered {intent_id} ({row['id']}); reply admission={row.get('admission')} "
+            f"to_run_id={row.get('to_run_id')} terminal_reason={row.get('terminal_reason')} "
+            f"terminal_at={row.get('terminal_at')}")

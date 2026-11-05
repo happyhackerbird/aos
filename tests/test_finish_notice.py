@@ -146,7 +146,8 @@ def test_notice_is_stored_even_when_the_parent_has_no_live_run(client: TestClien
     finish(client, child_run, status="review", report="child done")
     rows = client.get(f"/tasks/{parent['id']}/intents").json()
     notices = [r for r in rows if r["task_id"] == child["id"] and r["to_task_id"] == parent["id"]]
-    assert len(notices) == 1 and notices[0]["state"] == "stored"
+    assert len(notices) == 1 and notices[0]["state"] == "unavailable"
+    assert notices[0]["admission"] == "unavailable" and notices[0]["terminal_reason"] == "no_live_receiver"
     assert "child done" in notices[0]["body"]
 
 
@@ -155,7 +156,7 @@ def test_parent_acknowledges_the_notice(client: TestClient) -> None:
     finish(client, child_run, status="review", report="done")
     row = inbox(client, parent_run)[0]
     acked = client.post(f"/intents/{row['id']}/ack", json={"run_id": parent_run["id"],
-                                                          "claim_token": parent_run["claim_token"]})
+                                                          "claim_token": parent_run["claim_token"], "source": "cli"})
     assert acked.status_code == 200, acked.text
     assert acked.json()["state"] == "acknowledged"
     assert inbox(client, parent_run) == []
@@ -168,7 +169,7 @@ def test_a_reply_to_a_notice_is_refused_in_both_forms(client: TestClient) -> Non
     finish(client, child_run, status="review", report="done")
     row = inbox(client, parent_run)[0]
     client.post(f"/intents/{row['id']}/ack", json={"run_id": parent_run["id"],
-                                                   "claim_token": parent_run["claim_token"]})
+                                                   "claim_token": parent_run["claim_token"], "source": "cli"})
     agent = client.post(f"/tasks/{parent['id']}/intents", json={
         "run_id": parent_run["id"], "claim_token": parent_run["claim_token"], "reply_to": row["id"],
         "body": "thanks"})

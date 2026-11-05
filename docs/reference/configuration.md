@@ -22,7 +22,7 @@ default-branch commit that the repository policy uses, never from a worktree or 
 task branch, so a task cannot change it for its own run. A missing file means no
 workflow; a repository with no commits has none either.
 
-Three keys are allowed and any other key, including a table, is refused:
+These keys are allowed and any other key, including a table, is refused:
 
 - `test_command`: a string. Surrounding whitespace is stripped; blank is refused,
   and so is any control character other than tab.
@@ -32,6 +32,27 @@ Three keys are allowed and any other key, including a table, is refused:
 - `prompt`: a string. CRLF line endings become LF and the text is stripped. Blank
   is refused, so is any control character other than newline and tab, and the
   stripped text may not exceed 4096 bytes (bytes, not characters).
+- `protected`: a list of paths an agent's result may not add, change or delete
+  ([locked paths](#locked-paths-and-the-change-report)).
+- `watch`: a list of paths the run's change report names when the result touches
+  them.
+- `required_checks`: a list of check names (`[a-z0-9][a-z0-9-]{0,39}`, at most 20)
+  that every task's review run in this repository needs on record before accept or
+  merge, added before each task's own `aos add --require` names
+  ([required checks](cli.md#required-checks)). An empty list refuses the file, and
+  so does `test-changes`, which AOS adds itself ([before and after](#before-and-after-the-agent)).
+- `baseline`: `true` or `false` (default). `true` runs the acceptance commands once
+  before the agent for every task of this repository
+  ([before and after](#before-and-after-the-agent)).
+
+A runner older than a key refuses the whole file at claim, and so stops every task of
+the repository: deploy the runners before committing a new key.
+
+`protected` and `watch` entries are Git glob patterns relative to the repository
+root, matched as `:(glob)<pattern>`: `*` stays within one directory, `**` crosses
+directories, and a directory name (with or without a trailing `/`) covers
+everything under it. An empty list, a blank entry, a control character, a leading
+`/` or `:`, or an empty, `.` or `..` path component refuses the file.
 
 A file that does not parse, is not UTF-8, is not a regular file (a symbolic link or
 a directory of that name), or breaks a rule above is an error, never a silent skip.
@@ -60,6 +81,72 @@ workflow `test_command`, dropping exact duplicates in order. Missing historical
 snapshots refuse rather than invent checks. PR delivery records an actionable refusal
 and still sends the review card; requeue and run the task again to obtain a trustworthy
 snapshot before opening a PR or integrating.
+
+### Locked paths and the change report
+
+A run's result may not add, change or delete a locked path. The locked paths are
+`aos-policy.toml`, `aos-workflow.toml` (always, with or without a `protected` key)
+and every `protected` pattern. After the runner fetches the result, and before any
+acceptance sandbox or command, it compares the result commit with the run's start
+(`base_commit`: the previous attempt's tip on a continuation, else the default-branch
+commit the run was cut from), never with the current default branch, which may have
+moved during the run. A move counts as a deletion of the old path. Any match ends the
+run `failed` with an error naming each path (up to 40, then a count), restores the
+task branch as a refused result does, and pushes nothing. A comparison that cannot
+complete refuses too.
+
+There is no per-task exception. A locked file changes only by a commit on the
+default branch; the next run is cut from there. The prompt lists the locked
+patterns, so an agent can stop and report rather than spend a run. `conftest.py`
+and `pyproject.toml` are not locked by default: tests may legitimately add them. Use
+the repository's acceptance command to neutralise them for acceptance tests, and
+`watch` to see when they change.
+
+Every run that fetches a result also reports what it changed since its start, in the
+report's protected tail: the file count and added and deleted lines, the new files,
+the deleted files, then each changed path that matches `watch`, at most 40 paths in
+all. The report is information only; it refuses nothing.
+
+The check reads paths, not intent. An agent that merges the default branch into its
+work brings any later default-branch change to a locked file into its own diff, and
+that run is refused: cut a new run instead.
+
+### Before and after the agent
+
+With `baseline = true` in `aos-workflow.toml`, or `AOS_OPENSHELL_BASELINE=1` on the
+worker for every repository, the run's acceptance commands run once on the job tree
+in a fresh `<name>-pre` sandbox before the agent, and the report compares each
+command's exit code before and after. The before-run needs fresh acceptance; a
+worker with `AOS_OPENSHELL_FRESH_ACCEPTANCE=0` skips the repository's request with a
+note (the worker setting refuses to start that way).
+
+**Per test.** Every fresh acceptance and before-run sandbox exports
+`AOS_TEST_RESULTS=/sandbox/test-results`, an empty directory outside the result tree.
+A command that writes JUnit XML there (`pytest --junitxml="$AOS_TEST_RESULTS/own.xml"`,
+most test tools have an equivalent) gets a test-by-test comparison: every test that
+passed before the agent and is missing, skipped, failing or erroring after it is
+named in the report. A test that now fails is listed only when acceptance still
+passed; otherwise that failure is already the verdict. The verdict itself stays the
+exit code of each command. Up to 20 regular `*.xml` files of up to 5 MiB each are read
+from each side, before its sandbox is deleted; a file with a DOCTYPE or entity
+declaration, one that does not parse, or one over the cap is left out and named.
+No readable file on either side means no test-level comparison, said in the report
+and never counted as a pass. These files are written by a process that ran the
+agent's code: they catch accidents and shortcuts, not a determined forgery.
+
+**Lost tests hold the accept.** A run that reaches review with lost tests posts them
+with its result (`test_changes`, at most 100), and the bus adds the built-in check
+`test-changes` to that run: `aos accept` and `aos merge` refuse with `required checks
+missing: test-changes` until someone records why, usually as a waiver (`aos
+record-check AO-<n> test-changes --commit <head> --waive --note "renamed to ..."`).
+The run is not failed: a rename then costs one line, not a run.
+
+**A check that already passes.** When the before-run ran and every command exited 0,
+the task has nothing for the agent to fix: the run ends `blocked` (`acceptance already
+passes before the agent ...`) before the agent's sandbox is created. A task meant to
+guard behaviour that already works is added with `aos add --regression-guard`, which
+is part of its spec hash. A continuation (a run that starts from an earlier attempt's
+branch) is never ended this way, since a retry may start from work that already passes.
 
 ### Migrate registry test commands before rollout
 
@@ -345,6 +432,55 @@ could create survives into acceptance (large objects in the admin database remai
 and the login cannot reach them). A reset failure raises `postgres: reset: <reason>`
 and the run does not reach acceptance.
 
+## Interactive readiness hook
+
+`AOS_INTERACTIVE_READY_HOOK` is an optional runner-host command, not a sandbox
+command or repository setting. Unset or empty disables it. For example:
+
+```sh
+export AOS_INTERACTIVE_READY_HOOK='/opt/aos/bin/session-ready --notify'
+```
+
+The runner parses shell-style quoting into argv, without an implicit shell,
+expansion, pipelines or redirection. At settings load it rejects unbalanced
+quotes, whitespace-only commands, control characters and an executable that
+cannot be found/executed. A bare executable is resolved using the runner's
+configured `PATH` (platform default if absent); use absolute paths for reliability.
+
+Once per interactive run, after job upload and a successful direct
+`tmux has-session` probe, the runner flushes its attach announcement and starts
+the hook. A sandbox being created is not readiness. A harness that exits before
+its session is observed gets neither announcement nor hook. `stage=harness`
+still includes preparation, so early `aos attach` calls use the
+[CLI readiness wait](cli.md). The runner's readiness polling has a 60-second
+deadline, bounded sandbox exec probes, and observes cancellation/lease loss.
+
+The child's complete initial environment is:
+
+| Variable | Value |
+|---|---|
+| `PATH` | Python `os.defpath`, the platform's default executable search path; not the runner's inherited `PATH` |
+| `AOS_TASK_ID` | Task id, e.g. `AO-30` |
+| `AOS_RUN_ID` | Run id, e.g. `AO-30-r2` |
+| `AOS_SANDBOX_NAME` | OpenShell sandbox name, including its bus-specific prefix |
+| `AOS_HARNESS` | Harness key: `pi` (including the `omp` flavour) or `claude` |
+| `AOS_ATTACH_COMMAND` | `aos attach <run id>` |
+
+No other variables are inherited: no bus token, claim credential, provider
+credential, `DATABASE_URL`, `HOME` or bus URL. An interpreter may add its own
+variables at startup. Do not put credentials in command arguments; hook programs
+needing their own configuration must locate it explicitly.
+
+The host starts the command with `Popen`, a new process session and all three
+standard streams connected to `/dev/null`. A background monitor reaps it and
+kills its process group after 30 seconds. The run never joins or waits for the
+hook; if still running when the run finishes, its process group is killed then.
+On hosts that forbid process-group signaling it falls back to killing the direct
+child; such hosts cannot guarantee termination of hook-spawned descendants.
+Run notes record `interactive ready hook: exit <code>`, `timed out after 30 s`,
+`stopped at run end`, or a start/monitor failure's exception type, without command
+output. Every hook outcome leaves the run's status and verdict untouched.
+
 ## Task prompt instructions
 
 Sandboxed tasks do not read the retired `.aos/runner-prompt.toml`. Commit repository
@@ -353,3 +489,43 @@ resolution with each claim and combines its prompt with the task brief and runne
 rules. If the default commit contains `.claude/skills/verify/SKILL.md`, the prompt
 asks the harness to read it by path. Operator plugins are configured separately;
 they are never discovered by reading the repository's own harness configuration.
+
+### Instruction files
+
+Put each instruction where only the sessions that need it load it. A root file cannot
+be hidden from a worker, because `filesystem.exclude` refuses a tracked path.
+
+| Session | Root `AGENTS.md` / `CLAUDE.md` | Operator's user-level file | `prompt`, brief, contracts |
+|---|---|---|---|
+| Direct Claude Code | Loaded | `~/.claude/CLAUDE.md` | Not loaded |
+| Direct omp | Loaded | `~/.omp/agent/AGENTS.md` | Not loaded |
+| AOS Claude worker | Not loaded (`--setting-sources ""`) | Not loaded | Delivered |
+| AOS omp worker | Loaded; `--no-rules` does not stop it | Not loaded | Delivered |
+| AOS Pi worker | Not loaded (`--no-context-files`) | Not loaded | Delivered |
+| AOS Codex worker | Not measured; no launch flag turns it off | Not loaded | Delivered |
+
+The Claude and omp rows were measured on 2026-11-02 under each worker's launch flags,
+outside a sandbox, with Claude Code and omp 18.12.1. The Pi row comes from the launch
+flags in `agent_os/pi.py`. Workers cannot see the user-level file because the runner
+points `CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR` and `CODEX_HOME` at directories inside
+the sandbox.
+
+- **Repository facts** (what the repository is, its commands, its hard limits): root
+  `AGENTS.md`, plus a one-line `CLAUDE.md` holding `@AGENTS.md`. Claude and Pi workers
+  do not load it, so the workflow `prompt` tells workers to read it.
+- **Worker rules** (write boundaries, locked files, how to ask, what to report): the
+  workflow `prompt`, `tasks/contracts/` and the brief. Keep them out of the root file:
+  a direct session would load them, and "your task brief is in `tasks/`" misdirects it.
+- **Direct-session steps** (session routine, commit and push, status upkeep): the
+  operator's user-level file. Keep them out of the root file: an omp worker would load
+  them too.
+- **Status:** one owner writes it. Workers report in the run's Handoff section, and
+  the bus and the coordinator record hold the status of AOS work. A status file the
+  repository keeps for direct work belongs in `protected`.
+
+A coordinator is a direct session: it loads the user-level and root files, and its
+rules come from the `aos-coordinator` skill.
+
+To move an existing repository, carry the worker rules from root `AGENTS.md` into
+`tasks/contracts/write-boundaries.md` and name that file in `prompt`. Both are
+coordinator commits on the default branch, made while no run is in flight.

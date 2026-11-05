@@ -416,6 +416,10 @@ def test_ask_requests_ack_reply_round_trip(
     _ready(client, task_b["id"])
     run_a = _claim(client, task_a["id"])
     run_b = _claim(client, task_b["id"])
+    for run in (run_a, run_b):
+        store.start_run(run["id"], run["claim_token"], base_commit="a", branch="b", worktree="/x")
+        store.update_receiver(run["id"], run["claim_token"], action="receiving",
+                              owner=run["id"], reason="native_start")
 
     worktree = _git_worktree(tmp_path / "wt")
     _write_run_json(worktree, run_id=run_a["id"], task_id=task_a["id"], claim_token=run_a["claim_token"])
@@ -525,7 +529,13 @@ def test_show_prints_intent_line_with_state(client: TestClient, capsys: pytest.C
     code = main(["show", task_a["id"]], client=client)
     assert code == 0
     out = capsys.readouterr().out
-    assert f"intent {intent['id']}: stored {task_a['id']} -> {task_b['id']}" in out
+    assert f"intent {intent['id']}: unavailable {task_a['id']} -> {task_b['id']}" in out
+    assert "admission=unavailable" in out and "terminal_reason=no_live_receiver" in out
+    # SU3 D10: the evidence facts replace the unqualified via/delivered/acked/attempts fields.
+    assert "receipts=[stored@" in out and "/bus:store" in out
+    assert "undelivered@" in out and "/bus:admission(no_live_receiver)" in out
+    assert "acknowledged=absent" in out and "prepared=absent" in out
+    assert "via=" not in out and " acked=" not in out and "attempts=" not in out
 
 
 # -- ask --operator (watch-and-steer lane 1) ------------------------------------
@@ -536,18 +546,17 @@ def test_ask_operator_message_prints_id_state_and_no_live_run(
     assert task["id"] == "AO-1"
 
     code = main(["ask", task["id"], "Focus on the API first.", "--operator"], client=client)
-    assert code == 0
-    assert capsys.readouterr().out.splitlines() == [
-        "operator-i1 stored -> AO-1",
-        "no live run on AO-1; the message waits on the bus until a run pulls its inbox",
-    ]
+    assert code == 2
+    output = capsys.readouterr().out
+    assert "operator-i1 unavailable" in output and "admission=unavailable" in output
+    assert "terminal_reason=no_live_receiver" in output and "waits" not in output
     rows = client.get(f"/tasks/{task['id']}/intents").json()
     assert len(rows) == 1
     row = rows[0]
     assert row["id"] == "operator-i1"
     assert row["task_id"] == "operator"
     assert row["to_task_id"] == "AO-1"
-    assert row["state"] == "stored"
+    assert row["state"] == "unavailable" and row["terminal_at"]
     assert row["run_id"] is None
 
 
@@ -555,11 +564,16 @@ def test_ask_operator_message_to_live_run_prints_one_line(
         client: TestClient, capsys: pytest.CaptureFixture[str]) -> None:
     task = _create(client, repo="repo-ask-op-live", title="Live")
     _ready(client, task["id"])
-    _claim(client, task["id"])
+    run = _claim(client, task["id"])
+    client.post(f"/runs/{run['id']}/start", json={
+        "claim_token": run["claim_token"], "base_commit": "a", "branch": "b", "worktree": "/x"})
+    client.post(f"/runs/{run['id']}/receiver", json={
+        "claim_token": run["claim_token"], "action": "receiving", "owner": run["id"], "reason": "native_start"})
 
     code = main(["ask", task["id"], "Leave the UI unchanged.", "--operator"], client=client)
     assert code == 0
-    assert capsys.readouterr().out.splitlines() == [f"operator-i1 stored -> {task['id']}"]
+    output = capsys.readouterr().out
+    assert len(output.splitlines()) == 1 and "admission=accepted" in output and run["id"] in output
 
 
 def test_ask_operator_reply_answers_an_agent_question(
@@ -567,6 +581,10 @@ def test_ask_operator_reply_answers_an_agent_question(
     task = _create(client, repo="repo-ask-op-reply", title="Asker")
     _ready(client, task["id"])
     run = _claim(client, task["id"])
+    client.post(f"/runs/{run['id']}/start", json={
+        "claim_token": run["claim_token"], "base_commit": "a", "branch": "b", "worktree": "/x"})
+    client.post(f"/runs/{run['id']}/receiver", json={
+        "claim_token": run["claim_token"], "action": "receiving", "owner": run["id"], "reason": "native_start"})
     asked = client.post(f"/tasks/{task['id']}/intents", json={
         "run_id": run["id"], "claim_token": run["claim_token"],
         "to_task_id": "operator", "body": "Which schema?"})
@@ -576,8 +594,8 @@ def test_ask_operator_reply_answers_an_agent_question(
     code = main(["ask", question_id, "Yes, use the existing schema.", "--reply", "--operator"],
                 client=client)
     assert code == 0
-    assert capsys.readouterr().out.splitlines() == [
-        f"operator-i1 stored -> {task['id']} (answers {question_id})"]
+    output = capsys.readouterr().out
+    assert f"answer recorded for {question_id}" in output and "admission=accepted" in output
     rows = {row["id"]: row for row in client.get(f"/tasks/{task['id']}/intents").json()}
     assert rows[question_id]["state"] == "answered"
     assert rows["operator-i1"]["reply_to"] == question_id
@@ -601,7 +619,7 @@ def test_ask_operator_reply_to_a_request_not_for_the_operator_is_refused(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "the operator can answer only requests addressed to the operator" in captured.err
-    assert client.get(f"/tasks/{task_a['id']}/intents").json()[0]["state"] == "stored"
+    assert client.get(f"/tasks/{task_a['id']}/intents").json()[0]["state"] == "unavailable"
 
 
 def test_ask_operator_unknown_task(client: TestClient, capsys: pytest.CaptureFixture[str]) -> None:
@@ -640,6 +658,10 @@ def _live_pair(client: TestClient, repo: str) -> tuple[dict[str, Any], dict[str,
     started_b = client.post(f"/runs/{run_b['id']}/start", json={
         "claim_token": run_b["claim_token"], "base_commit": "a", "branch": "b", "worktree": "/xb"})
     assert started_b.status_code == 200, started_b.text
+    for run in (run_a, run_b):
+        response = client.post(f"/runs/{run['id']}/receiver", json={
+            "claim_token": run["claim_token"], "action": "receiving", "owner": run["id"], "reason": "native_start"})
+        assert response.status_code == 200, response.text
     return task_a, run_a, task_b, run_b
 
 
@@ -2152,11 +2174,13 @@ def test_attach_refuses_a_task_id_and_execs_the_exact_run(
     calls = []
     def sandbox(argv, **kwargs):
         calls.append(("sandbox", argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, "", "")
     def attach(argv):
         calls.append(("attach", argv))
         return 0
     monkeypatch.setattr("agent_os.cli._sandbox_command", sandbox)
     monkeypatch.setattr("agent_os.cli._attach_run", attach)
+    monkeypatch.setattr("agent_os.cli.time.monotonic", lambda: 100.0)
     assert main(["attach", "AO-1"], client=client) == 2
     assert capsys.readouterr().err == (
         "aos attach takes a run id (AO-<n>-r<k>), not a task id; see aos show AO-<n>\n")
@@ -2168,10 +2192,15 @@ def test_attach_refuses_a_task_id_and_execs_the_exact_run(
     suffix = ["-E", "75", "/usr/local/lib/aos-agent/attach.lock", "/usr/bin/tmux", "-S",
               "/tmp/aos-tmux.sock", "attach-session", "-t", "aos"]
     assert main(["attach", run["id"]], client=client) == 0
-    assert calls == [("attach", prefix + ["-n"] + suffix)]
+    probe = ("sandbox", [
+        "openshell", "sandbox", "exec", "-n", "ab-ao-1-r1", "--no-tty", "--no-login-shell", "--",
+        "/usr/bin/tmux", "-S", "/tmp/aos-tmux.sock", "has-session", "-t", "aos"],
+        {"capture_output": True, "text": True, "timeout": 60.0})
+    assert calls == [probe, ("attach", prefix + ["-n"] + suffix)]
     calls.clear()
     assert main(["attach", run["id"], "--takeover"], client=client) == 0
     assert calls == [
+        probe,
         ("sandbox", ["openshell", "sandbox", "exec", "-n", "ab-ao-1-r1", "--no-tty", "--no-login-shell", "--",
                      "/usr/bin/tmux", "-S", "/tmp/aos-tmux.sock", "detach-client", "-s", "aos"],
          {"capture_output": True, "text": True, "timeout": 30}),
@@ -2203,6 +2232,8 @@ def test_attach_refusals(client: TestClient, store: Store, monkeypatch: pytest.M
         assert main(["attach", rid], client=client) == 1
         assert capsys.readouterr().err == reason + "\n"
     set_run(worktree="openshell:ab-ao-1-r1")
+    monkeypatch.setattr("agent_os.cli._sandbox_command",
+                        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "", ""))
     monkeypatch.setattr("agent_os.cli._attach_run", lambda argv: 75)
     assert main(["attach", rid], client=client) == 1
     assert capsys.readouterr().err == (
@@ -2222,3 +2253,210 @@ def test_attach_refusals(client: TestClient, store: Store, monkeypatch: pytest.M
     assert capsys.readouterr().err == "no run AO-1-r99\n"
     assert main(["attach", "AO-999-r1"], client=client) == 1
     assert "Task not found" in capsys.readouterr().err
+
+
+@pytest.fixture
+def attach_clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    clock = [0.0]
+    monkeypatch.setattr("agent_os.cli.time.monotonic", lambda: clock[0])
+    def sleep(seconds):
+        clock[0] += seconds
+    monkeypatch.setattr("agent_os.cli.time.sleep", sleep)
+    return clock
+
+
+@pytest.mark.parametrize("missing", [
+    "error connecting to /tmp/aos-tmux.sock (No such file or directory)",
+    "error connecting to /tmp/aos-tmux.sock (Connection refused)",
+    "no server running on /tmp/aos-tmux.sock",
+    "can't find session: aos",
+    "no sessions",
+])
+def test_attach_waits_for_session_then_attaches(
+        client: TestClient, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+        attach_clock: list[float], missing: str) -> None:
+    _, run = _interactive_cli_run(client)
+    probes = []
+    attached = []
+    def sandbox(argv, **kwargs):
+        probes.append(kwargs["timeout"])
+        return subprocess.CompletedProcess(argv, 1 if len(probes) < 3 else 0, "",
+                                           missing if len(probes) < 3 else "")
+    monkeypatch.setattr("agent_os.cli._sandbox_command", sandbox)
+    monkeypatch.setattr("agent_os.cli._attach_run", lambda argv: attached.append(argv) or 0)
+    assert main(["attach", run["id"]], client=client) == 0
+    assert probes == [60, 59, 58]
+    assert attach_clock == [2]
+    assert len(attached) == 1
+    assert capsys.readouterr().err == (
+        f"waiting for run {run['id']}'s tmux session (up to 60 seconds)...\n")
+
+
+def test_attach_wait_deadline_bounds_probes(
+        client: TestClient, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+        attach_clock: list[float]) -> None:
+    _, run = _interactive_cli_run(client)
+    probes = []
+    def sandbox(argv, **kwargs):
+        probes.append(kwargs["timeout"])
+        attach_clock[0] += min(17, kwargs["timeout"])
+        return subprocess.CompletedProcess(argv, 1, "", "can't find session: aos")
+    monkeypatch.setattr("agent_os.cli._sandbox_command", sandbox)
+    monkeypatch.setattr("agent_os.cli._attach_run", lambda argv: pytest.fail("must not attach"))
+    assert main(["attach", run["id"]], client=client) == 1
+    assert probes == [60, 42, 24, 6]
+    assert attach_clock == [60]
+    assert capsys.readouterr().err.splitlines() == [
+        f"waiting for run {run['id']}'s tmux session (up to 60 seconds)...",
+        f"timed out waiting for run {run['id']}'s tmux session after 60 seconds",
+    ]
+
+
+def test_attach_probe_timeout_is_handled(
+        client: TestClient, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+        attach_clock: list[float]) -> None:
+    _, run = _interactive_cli_run(client)
+    probes = []
+    def sandbox(argv, **kwargs):
+        probes.append(kwargs["timeout"])
+        attach_clock[0] += kwargs["timeout"]
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+    monkeypatch.setattr("agent_os.cli._sandbox_command", sandbox)
+    monkeypatch.setattr("agent_os.cli._attach_run", lambda argv: pytest.fail("must not attach"))
+    assert main(["attach", run["id"]], client=client) == 1
+    assert probes == [60]
+    assert attach_clock == [60]
+    assert capsys.readouterr().err == (
+        f"timed out waiting for run {run['id']}'s tmux session after 60 seconds\n")
+
+
+@pytest.mark.parametrize(("fields", "reason"), [
+    ({"execution": "headless"}, "is headless; only an interactive run can be attached"),
+    ({"status": "cancelled"}, "is cancelled, not live"),
+    ({"stage": "acceptance"}, "is past its harness stage (acceptance); its session is closed"),
+    ({"worktree": "/tmp/work"}, "has no OpenShell sandbox (worktree /tmp/work)"),
+])
+def test_attach_rechecks_refusals_while_waiting(
+        client: TestClient, store: Store, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str], attach_clock: list[float],
+        fields: dict, reason: str) -> None:
+    _, run = _interactive_cli_run(client)
+    probes = []
+    def sandbox(argv, **kwargs):
+        probes.append(argv)
+        with store.connection() as db:
+            for key, value in fields.items():
+                db.execute(f"UPDATE task_runs SET {key}=? WHERE id=?", (value, run["id"]))
+        return subprocess.CompletedProcess(argv, 1, "", "can't find session: aos")
+    monkeypatch.setattr("agent_os.cli._sandbox_command", sandbox)
+    monkeypatch.setattr("agent_os.cli._attach_run", lambda argv: pytest.fail("must not attach"))
+    assert main(["attach", run["id"]], client=client) == 1
+    assert len(probes) == 1
+    assert capsys.readouterr().err.splitlines() == [
+        f"waiting for run {run['id']}'s tmux session (up to 60 seconds)...",
+        f"run {run['id']} {reason}",
+    ]
+
+
+@pytest.mark.parametrize(("code", "stderr", "stdout", "detail"), [
+    (1, "gateway unavailable", "", "gateway unavailable"),
+    (1, "sandbox not found", "", "sandbox not found"),
+    (1, "exec failed: can't find session: aos", "", "exec failed: can't find session: aos"),
+    (2, "can't find session: aos", "", "can't find session: aos"),
+    (1, "", "connection closed", "connection closed"),
+    (2, "", "", "exit 2"),
+])
+def test_attach_does_not_retry_unrelated_exec_errors(
+        client: TestClient, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+        attach_clock: list[float], code: int, stderr: str, stdout: str, detail: str) -> None:
+    _, run = _interactive_cli_run(client)
+    probes = []
+    def sandbox(argv, **kwargs):
+        probes.append(argv)
+        return subprocess.CompletedProcess(argv, code, stdout, stderr)
+    monkeypatch.setattr("agent_os.cli._sandbox_command", sandbox)
+    monkeypatch.setattr("agent_os.cli._attach_run", lambda argv: pytest.fail("must not attach"))
+    assert main(["attach", run["id"]], client=client) == 1
+    assert len(probes) == 1
+    assert attach_clock == [0]
+    assert capsys.readouterr().err == f"cannot probe run {run['id']}'s tmux session: {detail}\n"
+
+
+# -- required checks (verification gates U2) -------------------------------------
+
+def _gated_review(client: TestClient, capsys: pytest.CaptureFixture[str]) -> tuple[dict[str, Any], dict[str, Any]]:
+    task = _create(client, repo="repo-gate", title="Gated", required_checks=["review", "real-service"])
+    _ready(client, task["id"])
+    run = _claim(client, task["id"])
+    assert client.post(f"/runs/{run['id']}/start", json={"claim_token": run["claim_token"], "base_commit": "a" * 40,
+                                                        "branch": "work", "worktree": "/tmp/w"}).status_code == 200
+    assert client.post(f"/runs/{run['id']}/result", json={"claim_token": run["claim_token"], "status": "review",
+                                                         "report": "did it", "result_commit": "c" * 40,
+                                                         "verdict": "pass"}).status_code == 200
+    capsys.readouterr()
+    return task, run
+
+
+def test_add_require_flags_reach_the_task(client: TestClient, capsys: pytest.CaptureFixture[str],
+                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO("brief\n"))
+    code = main(["add", "--repo", "repo-req", "--title", "Req", "--brief-file", "-", "--accept", "true",
+                 "--require", "review", "--require", "merge-check"], client=client)
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["required_checks"] == ["review", "merge-check"]
+
+
+def test_record_check_then_accept(client: TestClient, capsys: pytest.CaptureFixture[str]) -> None:
+    task, run = _gated_review(client, capsys)
+    assert main(["accept", task["id"]], client=client) == 1
+    assert "required checks missing: review, real-service" in capsys.readouterr().err
+    assert main(["record-check", task["id"], "review", "--commit", "d" * 40, "--note", "AO-9"], client=client) == 1
+    assert "is not the head of" in capsys.readouterr().err
+    assert main(["record-check", task["id"], "review", "--commit", "c" * 40, "--note", "AO-9 review"],
+                client=client) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "passed"
+    assert main(["record-check", task["id"], "real-service", "--commit", "c" * 40, "--waive",
+                 "--note", "no external service touched"], client=client) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "waived"
+    assert main(["show", task["id"]], client=client) == 0
+    out = capsys.readouterr().out
+    assert "required_checks: review, real-service" in out
+    assert "check review: passed (AO-9 review)" in out
+    assert "check real-service: waived (no external service touched)" in out
+    assert main(["accept", task["id"]], client=client) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "done"
+
+
+def test_show_marks_missing_checks(client: TestClient, capsys: pytest.CaptureFixture[str]) -> None:
+    task, _ = _gated_review(client, capsys)
+    assert main(["show", task["id"]], client=client) == 0
+    out = capsys.readouterr().out
+    assert "check review: missing" in out and "check real-service: missing" in out
+
+
+def test_record_check_needs_a_note(client: TestClient, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        main(["record-check", "AO-1", "review", "--commit", "c" * 40], client=client)
+
+
+# -- lost tests and the regression guard (verification gates U3) -------------------
+
+def test_add_regression_guard_and_show_lost_tests(client: TestClient, capsys: pytest.CaptureFixture[str],
+                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO("brief\n"))
+    assert main(["add", "--repo", "repo-guard", "--title", "Guard", "--brief-file", "-", "--accept", "true",
+                 "--regression-guard"], client=client) == 0
+    task = json.loads(capsys.readouterr().out)
+    assert task["regression_guard"] is True
+    _ready(client, task["id"])
+    run = _claim(client, task["id"])
+    client.post(f"/runs/{run['id']}/start", json={"claim_token": run["claim_token"], "base_commit": "a" * 40,
+                                                  "branch": "work", "worktree": "/tmp/w"})
+    client.post(f"/runs/{run['id']}/result", json={
+        "claim_token": run["claim_token"], "status": "review", "report": "did it", "result_commit": "c" * 40,
+        "verdict": "pass", "test_changes": [{"test": "t::gone", "after": "missing"}]})
+    assert main(["show", task["id"]], client=client) == 0
+    out = capsys.readouterr().out
+    assert "regression_guard: True" in out
+    assert "test changes: 1 passed before the agent and not after: t::gone (missing)" in out
+    assert "check test-changes: missing (1 passed before the agent and not after: t::gone (missing))" in out

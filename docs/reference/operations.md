@@ -329,6 +329,49 @@ Operating a family from a laptop, as proven on the server on 2026-10-22:
    live headless child's runner still finishes its harness and acceptance
    before every post is refused.
 
+## A Herdr tab for every interactive run
+
+`scripts/herdr/aos-herdr-tab` opens a tab labelled with the task id in the
+operator's Herdr session and runs `aos attach <run-id>` in it. After the attach
+ends, it reads the task's tab-separated row from `aos list` every 5 s until the
+status is non-empty and no longer `running`, for at most 15 minutes. Failed
+reads, empty output and missing task rows keep polling without replacing the
+last observed status. It then prints `status: <value>` (the last value if the
+wait expires, or `unknown` if no status was read) and closes the tab 60 s later.
+This waits for acceptance rather than taking a status line from the task brief.
+To use it, set it as the runner's interactive-ready hook on the runner host:
+
+```sh
+AOS_INTERACTIVE_READY_HOOK='/usr/bin/env HERDR_BIN=/home/ops/.local/bin/herdr AOS_HERDR_SESSION=default /opt/agent-os/scripts/herdr/aos-herdr-tab'
+```
+
+The runner starts the hook once per interactive run, right after the sandbox's
+tmux session is up. The command is split like a shell would split it, but no
+shell runs it, so variables are set through `/usr/bin/env`. The hook starts in a
+new session with its output discarded. Its environment is `PATH` (Python's
+`os.defpath`, the platform default), `AOS_TASK_ID`, `AOS_RUN_ID`, `AOS_SANDBOX_NAME`,
+`AOS_HARNESS` and `AOS_ATTACH_COMMAND`, and nothing else. The runner kills the
+hook's process group after 30 s, or at the end of the run if it is still
+running. Its outcome goes to the run notes and never changes the verdict.
+Consequences:
+
+- Set `HERDR_BIN` to an absolute path unless `herdr` is in `/usr/bin` or
+  `/bin`. `AOS_HERDR_SESSION` picks the session (default
+  `default`).
+- The script only creates the tab and types one command line into its pane,
+  then normally returns within a few seconds. With `timeout` available, each
+  Herdr call is bounded to 10 s; a wedged Herdr can still bring the hook near
+  its 30 s limit (29.1 s observed, including cleanup). The
+  attach, status polling and delayed close run in the pane's shell (bash, zsh or
+  dash), so they outlive the hook. They also use the Herdr session's environment, so the
+  shell that started the Herdr server must have `AOS_URL`, `AOS_TOKEN` and `aos`
+  on its `PATH`. The hook itself carries no credentials.
+- For manual use, give an explicit run id: `aos-herdr-tab AO-31-r1`.
+  `AOS_HERDR_CLOSE_DELAY` changes the 60 s delay after the status is printed;
+  whole seconds are decimal even with leading zeroes.
+  Hook calls use `AOS_TASK_ID` only when it matches `AO-<digits>`; otherwise the
+  task id is derived from the run id. An explicit run id always determines the task.
+
 ## Reviewing a run
 
 For a repository that declares evidence ([configuration](configuration.md#evidence)),
@@ -349,7 +392,8 @@ a run in `review` carries a summary of what it captured.
 - `aos accept` and `aos merge` print `evidence <run id>: flags: <flags or none>` for
   the newest review run before they act. Flags warn; there is no override flag and
   nothing is refused because of them, so reading the line is the review. Both act as
-  before on a flagged run.
+  before on a flagged run. Required checks are separate: a task that names them is
+  refused until each is on record for the run's head (below).
 - `aos reject AO-<n> [--note TEXT]` refuses the newest review run. It is run-level:
   that run ends `rejected` with `rejected by the operator: <note>` as its error and as
   the last line of its report, and the task returns to `backlog`, so the next
@@ -381,6 +425,19 @@ a bus that no longer exists are never pruned; remove them by hand.
 A PR merged in the GitHub UI is closed by the code-lane sweep past the flags, because
 aos cannot refuse a merge GitHub already made; the card and `aos show` still carry the
 flags. Its evidence is not removed by the command path, so it goes at the next prune.
+
+### Required checks
+
+A task can require checks that someone other than the agent has done: a review, a run
+against a real service, the merged-tree check. They come from the repository's
+`required_checks` in `aos-workflow.toml` and from `aos add --require NAME`, and the run
+keeps the list it was claimed with. Each is recorded for the review run's exact head with
+`aos record-check AO-<n> <name> --commit <head> [--waive] --note TEXT`, using the operator
+token, which no worker sandbox holds; `merge-check` is computed from the latest
+`aos integrate` record instead. `aos accept` and `aos merge` refuse with
+`required checks missing: <names>` until every one is passed or waived for that head;
+the sweep's close of a PR GitHub already merged is never refused. `aos show` lists each
+check's state. Commands and limits: [CLI reference](cli.md#required-checks).
 
 ## Known limits
 

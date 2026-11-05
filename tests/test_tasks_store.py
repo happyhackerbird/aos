@@ -12,7 +12,6 @@ import pytest
 from agent_os.store import (
     ClaimConflict,
     EmptyResult,
-    INTENT_ATTEMPTS,
     INTENT_BODY_MAX,
     Store,
     TASK_ALLOWED,
@@ -80,6 +79,10 @@ def test_task_id_monotonic_never_reused_after_cancel(store: Store) -> None:
     store.cancel_task(t1["id"])
     t3 = store.create_task(repo="r", title="c")
     assert t3["id"] == "AO-3"
+
+
+def test_create_accepts_the_devin_harness(store: Store) -> None:
+    assert store.create_task(repo="r", title="t", harness="devin")["harness"] == "devin"
 
 
 def test_create_minimal_lands_in_backlog(store: Store) -> None:
@@ -734,8 +737,10 @@ def _live_task(store: Store, *, repo: str):
     """Create a ready task and claim+start a run on it. Returns (task_id, run_id, token)."""
     t = store.create_task(repo=repo, title="t", brief="b", acceptance=["true"])
     store.ready_task(t["id"])
-    run = _claim(store, t["id"], worker="w", worker_host="mac", lease_seconds=600)
+    run = _claim(store, t["id"], worker="w", worker_host="mac", lease_seconds=3600)
     store.start_run(run["id"], run["claim_token"], base_commit="a", branch="b", worktree="/x")
+    store.update_receiver(run["id"], run["claim_token"], action="receiving",
+                          owner=f"native-{run['id']}", reason="native_start")
     return t["id"], run["id"], run["claim_token"]
 
 
@@ -794,10 +799,10 @@ def test_create_intent_unknown_to_task_id_raises_keyerror(store: Store) -> None:
         store.create_intent(a, a_run, a_tok, kind="request", to_task_id="AO-999", body="hi")
 
 
-def test_reply_moves_original_to_answered_from_delivered(store: Store) -> None:
+def test_reply_moves_original_to_answered_from_prepared(store: Store) -> None:
     a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
     original = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="hi")
-    store.report_delivery(original["id"], b_run, b_tok, "socket")
+    store.report_receipt(original["id"], b_run, b_tok, "prepared", "hook")
     reply = store.create_intent(b, b_run, b_tok, kind="request", reply_to=original["id"], body="ack")
     assert reply["to_task_id"] == a
     updated = store.get_intent(original["id"])
@@ -805,65 +810,45 @@ def test_reply_moves_original_to_answered_from_delivered(store: Store) -> None:
     assert updated["answered_at"] is not None
 
 
-def test_reply_refused_from_stored(store: Store) -> None:
-    a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
-    original = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="hi")
-    with pytest.raises(TransitionError):
-        store.create_intent(b, b_run, b_tok, kind="request", reply_to=original["id"], body="ack")
-
 
 # -- forward-only moves ------------------------------------------------------
 
-def test_report_delivery_on_acknowledged_row_refused(store: Store) -> None:
+def test_prepared_report_on_acknowledged_row_refused(store: Store) -> None:
     a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
     intent = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="hi")
-    store.ack_intent(intent["id"], b_run, b_tok)
+    store.ack_intent(intent["id"], b_run, b_tok, source="cli")
     with pytest.raises(TransitionError):
-        store.report_delivery(intent["id"], b_run, b_tok, "socket")
+        store.report_receipt(intent["id"], b_run, b_tok, "prepared", "hook")
 
 
 def test_ack_twice_unchanged(store: Store) -> None:
     a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
     intent = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="hi")
-    first = store.ack_intent(intent["id"], b_run, b_tok)
-    second = store.ack_intent(intent["id"], b_run, b_tok)
+    first = store.ack_intent(intent["id"], b_run, b_tok, source="cli")
+    second = store.ack_intent(intent["id"], b_run, b_tok, source="cli")
     assert first["acked_at"] == second["acked_at"]
     assert second["state"] == "acknowledged"
 
 
-# -- attempts -----------------------------------------------------------------
 
-def test_three_reports_then_attempt_limit(store: Store) -> None:
+def test_report_receipt_note_and_source_in_runs_jsonl(store: Store) -> None:
     a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
     intent = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="hi")
-    for _ in range(INTENT_ATTEMPTS):
-        store.report_delivery(intent["id"], b_run, b_tok, "socket")
-    with pytest.raises(TransitionError, match="attempt limit reached"):
-        store.report_delivery(intent["id"], b_run, b_tok, "socket")
-
-
-def test_inbox_report_keeps_stored_and_counts(store: Store) -> None:
-    a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
-    intent = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="hi")
-    result = store.report_delivery(intent["id"], b_run, b_tok, "inbox")
-    assert result["state"] == "stored"
-    assert result["delivery_attempts"] == 1
-
-
-def test_report_delivery_note_in_runs_jsonl(store: Store) -> None:
-    a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
-    intent = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="hi")
-    store.report_delivery(intent["id"], b_run, b_tok, "socket", note="push step 3 failed")
+    store.report_receipt(intent["id"], b_run, b_tok, "prepared", "hook", note="tool result appended")
+    store.report_receipt(intent["id"], b_run, b_tok, "prepared", "inbox_tool")
     lines = [json.loads(line) for line in store.runs_path.read_text().splitlines()]
-    delivered_lines = [line for line in lines if line["outcome"] == "intent:delivered"]
-    assert delivered_lines[-1]["receipt"]["note"] == "push step 3 failed"
+    prepared_lines = [line for line in lines if line["outcome"] == "intent:prepared"]
+    assert prepared_lines[-1]["receipt"]["note"] == "tool result appended"
+    assert prepared_lines[-1]["receipt"]["source"] == "hook"
+    repeats = [line for line in lines if line["outcome"] == "intent:attempt"]
+    assert repeats[-1]["receipt"]["source"] == "inbox_tool"
 
 
-def test_report_delivery_invalid_via_raises_valueerror(store: Store) -> None:
+def test_report_receipt_invalid_source_raises_valueerror(store: Store) -> None:
     a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
     intent = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="hi")
     with pytest.raises(ValueError):
-        store.report_delivery(intent["id"], b_run, b_tok, "carrier-pigeon")
+        store.report_receipt(intent["id"], b_run, b_tok, "prepared", "carrier-pigeon")
 
 
 # -- pending ------------------------------------------------------------------
@@ -872,22 +857,11 @@ def test_pending_excludes_acknowledged_and_caps_at_20(store: Store) -> None:
     a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
     intents = [store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body=f"m{i}")
               for i in range(22)]
-    store.ack_intent(intents[0]["id"], b_run, b_tok)
+    store.ack_intent(intents[0]["id"], b_run, b_tok, source="cli")
     pending = store.requests_for_run(b_run, b_tok)
     assert len(pending) == 20
     assert intents[0]["id"] not in [p["id"] for p in pending]
 
-
-def test_pending_due_false_inside_ack_seconds_true_after(store: Store) -> None:
-    a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
-    intent = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="hi")
-    store.report_delivery(intent["id"], b_run, b_tok, "socket")
-    soon = datetime.now(timezone.utc) + timedelta(seconds=10)
-    pending_soon = store.requests_for_run(b_run, b_tok, ack_seconds=900, now=soon)
-    assert pending_soon[0]["due"] is False
-    later = datetime.now(timezone.utc) + timedelta(seconds=901)
-    pending_later = store.requests_for_run(b_run, b_tok, ack_seconds=900, now=later)
-    assert pending_later[0]["due"] is True
 
 
 # -- expired ------------------------------------------------------------------
@@ -900,14 +874,15 @@ def test_expired_recipient_run_ended_after_request_even_with_newer_live_run(stor
     new_run = _claim(store, b, worker="w2", worker_host="mac", lease_seconds=600)
     store.start_run(new_run["id"], new_run["claim_token"], base_commit="a", branch="b", worktree="/y")
     store.requests_for_run(new_run["id"], new_run["claim_token"])
-    assert store.get_intent(intent["id"])["state"] == "expired"
+    assert store.get_intent(intent["id"])["state"] == "stored"
+    assert store.get_intent(intent["id"])["terminal_reason"] == "receiver_closed"
 
 
 def test_expired_when_attempt_and_run_end_share_the_same_second(store: Store) -> None:
     a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
     moment = datetime.now(timezone.utc).replace(microsecond=0)
     intent = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="hi", now=moment)
-    store.report_delivery(intent["id"], b_run, b_tok, "socket", now=moment)
+    store.report_receipt(intent["id"], b_run, b_tok, "prepared", "hook", now=moment)
     store.finish_run(b_run, b_tok, status="review", report="ok")
     moment_s = moment.isoformat(timespec="seconds").replace("+00:00", "Z")
     with store.connection() as db:
@@ -916,14 +891,15 @@ def test_expired_when_attempt_and_run_end_share_the_same_second(store: Store) ->
     new_run = _claim(store, b, worker="w2", worker_host="mac", lease_seconds=600)
     store.start_run(new_run["id"], new_run["claim_token"], base_commit="a", branch="b", worktree="/y")
     store.requests_for_run(new_run["id"], new_run["claim_token"])
-    assert store.get_intent(intent["id"])["state"] == "expired"
-    # a reclaim afterward does not resurrect it (expired is terminal)
+    assert store.get_intent(intent["id"])["state"] == "prepared"
+    assert store.get_intent(intent["id"])["terminal_reason"] == "receiver_closed"
+    # Exact ownership, not the timestamp, prevents resurrection.
     store.finish_run(new_run["id"], new_run["claim_token"], status="review", report="ok")
     store.requeue_task(b, "ready")
     another_run = _claim(store, b, worker="w3", worker_host="mac", lease_seconds=600)
     store.start_run(another_run["id"], another_run["claim_token"], base_commit="a", branch="b", worktree="/z")
     store.requests_for_run(another_run["id"], another_run["claim_token"])
-    assert store.get_intent(intent["id"])["state"] == "expired"
+    assert store.get_intent(intent["id"])["terminal_reason"] == "receiver_closed"
 
 
 def test_not_expired_when_request_written_after_run_ended(store: Store) -> None:
@@ -933,26 +909,16 @@ def test_not_expired_when_request_written_after_run_ended(store: Store) -> None:
     store.requeue_task(b, "ready")
     new_run = _claim(store, b, worker="w2", worker_host="mac", lease_seconds=600)
     store.start_run(new_run["id"], new_run["claim_token"], base_commit="a", branch="b", worktree="/y")
+    store.update_receiver(new_run["id"], new_run["claim_token"], action="receiving",
+                          owner="replacement", reason="native_start")
     intent = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="hi", now=later)
     store.requests_for_run(new_run["id"], new_run["claim_token"])
     assert store.get_intent(intent["id"])["state"] != "expired"
 
 
-# -- undeliverable ------------------------------------------------------------
-
-def test_undeliverable_after_three_attempts_and_ack_seconds_elapsed(store: Store) -> None:
-    a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
-    intent = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="hi")
-    for _ in range(INTENT_ATTEMPTS):
-        store.report_delivery(intent["id"], b_run, b_tok, "socket")
-    later = datetime.now(timezone.utc) + timedelta(seconds=901)
-    store.requests_for_run(b_run, b_tok, ack_seconds=900, now=later)
-    assert store.get_intent(intent["id"])["state"] == "undeliverable"
-
-
 # -- notices ------------------------------------------------------------------
 
-def test_waiting_notice_for_never_started_recipient(store: Store) -> None:
+def test_unavailable_notice_for_never_started_recipient(store: Store) -> None:
     a, a_run, a_tok = _live_task(store, repo="ra")
     b = store.create_task(repo="rb", title="t2", brief="b", acceptance=["true"])
     store.ready_task(b["id"])
@@ -961,32 +927,28 @@ def test_waiting_notice_for_never_started_recipient(store: Store) -> None:
     notices = store.sweep_intents(now=later, ack_seconds=900)
     matching = [n for n in notices if n["id"] == intent["id"]]
     assert len(matching) == 1
-    assert matching[0]["notice"] == "waiting"
+    assert matching[0]["notice"] == "no_live_receiver"
 
 
 def test_waiting_stamp_cleared_when_row_later_reaches_terminal_state(store: Store) -> None:
-    a, a_run, a_tok = _live_task(store, repo="ra")
-    b = store.create_task(repo="rb", title="t2", brief="b", acceptance=["true"])
-    store.ready_task(b["id"])
-    intent = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b["id"], body="hi")
+    a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
+    intent = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="hi")
     soon_after = datetime.now(timezone.utc) + timedelta(seconds=901)
     notices = store.sweep_intents(now=soon_after, ack_seconds=900)
     assert any(n["id"] == intent["id"] and n["notice"] == "waiting" for n in notices)
     assert store.mark_intent_notified(intent["id"], "waiting", now=soon_after) is True
     assert store.get_intent(intent["id"])["notified_at"] is not None
 
-    run_b = _claim(store, b["id"], worker="w", worker_host="mac", lease_seconds=600)
-    store.start_run(run_b["id"], run_b["claim_token"], base_commit="a", branch="b", worktree="/y")
-    store.finish_run(run_b["id"], run_b["claim_token"], status="review", report="ok")
+    store.finish_run(b_run, b_tok, status="review", report="ok")
 
     later = soon_after + timedelta(seconds=5)
     notices2 = store.sweep_intents(now=later, ack_seconds=900)
-    assert store.get_intent(intent["id"])["state"] == "expired"
+    assert store.get_intent(intent["id"])["state"] == "stored"
+    assert store.get_intent(intent["id"])["terminal_reason"] == "receiver_closed"
     assert store.get_intent(intent["id"])["notified_at"] is None
-    assert any(n["id"] == intent["id"] and n["notice"] == "expired" for n in notices2)
-    # a stamp for the stale "waiting" notice no longer matches the (now expired) row
+    assert any(n["id"] == intent["id"] and n["notice"] == "receiver_closed" for n in notices2)
     assert store.mark_intent_notified(intent["id"], "waiting", now=later) is False
-    assert store.mark_intent_notified(intent["id"], "expired", now=later) is True
+    assert store.mark_intent_notified(intent["id"], "receiver_closed", now=later) is True
 
 
 # -- framed text --------------------------------------------------------------
@@ -1045,9 +1007,9 @@ def test_get_intent_missing_raises_keyerror(store: Store) -> None:
 def test_failed_append_during_settle_aborts_move_and_retries_cleanly(store: Store, monkeypatch) -> None:
     a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
     intent = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="hi")
-    for _ in range(INTENT_ATTEMPTS):
-        store.report_delivery(intent["id"], b_run, b_tok, "socket")
-    later = datetime.now(timezone.utc) + timedelta(seconds=901)
+    store.report_receipt(intent["id"], b_run, b_tok, "prepared", "hook")
+    # b's lease (3600 s) has lapsed: the next settle closes its receiver and the row with it.
+    later = datetime.now(timezone.utc) + timedelta(seconds=3601)
 
     original_append = store._append_runs
     calls = {"n": 0}
@@ -1060,16 +1022,16 @@ def test_failed_append_during_settle_aborts_move_and_retries_cleanly(store: Stor
 
     monkeypatch.setattr(store, "_append_runs", flaky_append)
     with pytest.raises(OSError):
-        store.requests_for_run(b_run, b_tok, ack_seconds=900, now=later)
-    assert store.get_intent(intent["id"])["state"] == "delivered"
+        store.requests_for_run(a_run, a_tok, ack_seconds=900, now=later)
+    assert store.get_intent(intent["id"])["terminal_reason"] is None
 
-    store.requests_for_run(b_run, b_tok, ack_seconds=900, now=later)
-    assert store.get_intent(intent["id"])["state"] == "undeliverable"
+    store.requests_for_run(a_run, a_tok, ack_seconds=900, now=later)
+    assert store.get_intent(intent["id"])["terminal_reason"] == "receiver_closed"
+    assert store.get_intent(intent["id"])["state"] == "prepared"
     lines = [json.loads(line) for line in store.runs_path.read_text().splitlines()]
-    undeliverable_lines = [line for line in lines
-                           if line["outcome"] == "intent:undeliverable"
-                           and line["receipt"]["intent_id"] == intent["id"]]
-    assert len(undeliverable_lines) == 1
+    terminal_lines = [line for line in lines
+                      if line["outcome"] == "intent:terminal" and line["receipt"]["id"] == intent["id"]]
+    assert len(terminal_lines) == 1
 
 
 # -- D33: a refused call writes nothing, neither to the table nor the file -----
@@ -1079,7 +1041,7 @@ def _ripe_for_expiry(store: Store, a: str, a_run: str, a_tok: str, b: str, b_run
     expiry on the next settle, so a byte-identity test can show that a refused
     call skips the settle entirely (the row stays exactly as it is)."""
     intent = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="hi")
-    store.report_delivery(intent["id"], b_run, b_tok, "socket")
+    store.report_receipt(intent["id"], b_run, b_tok, "prepared", "hook")
     store.finish_run(b_run, b_tok, status="review", report="ok")
     return intent
 
@@ -1093,9 +1055,9 @@ def test_wrong_token_leaves_runs_jsonl_byte_identical_for_all_five_functions(sto
     with pytest.raises(TransitionError):
         store.create_intent(a, a_run, "wrong", kind="request", to_task_id=b, body="x")
     with pytest.raises(TransitionError):
-        store.report_delivery(intent["id"], b_run, "wrong", "socket")
+        store.report_receipt(intent["id"], b_run, "wrong", "prepared", "hook")
     with pytest.raises(TransitionError):
-        store.ack_intent(intent["id"], b_run, "wrong")
+        store.ack_intent(intent["id"], b_run, "wrong", source="cli")
     with pytest.raises(TransitionError):
         store.requests_for_run(b_run, "wrong")
     with pytest.raises(TransitionError):
@@ -1114,9 +1076,9 @@ def test_unknown_run_leaves_runs_jsonl_byte_identical_for_all_five_functions(sto
     with pytest.raises(KeyError):
         store.create_intent(a, "AO-999-r1", "tok", kind="request", to_task_id=b, body="x")
     with pytest.raises(KeyError):
-        store.report_delivery(intent["id"], "AO-999-r1", "tok", "socket")
+        store.report_receipt(intent["id"], "AO-999-r1", "tok", "prepared", "hook")
     with pytest.raises(KeyError):
-        store.ack_intent(intent["id"], "AO-999-r1", "tok")
+        store.ack_intent(intent["id"], "AO-999-r1", "tok", source="cli")
     with pytest.raises(KeyError):
         store.requests_for_run("AO-999-r1", "tok")
     with pytest.raises(KeyError):
@@ -1129,7 +1091,7 @@ def test_unknown_run_leaves_runs_jsonl_byte_identical_for_all_five_functions(sto
 def test_live_run_of_another_task_refused_leaves_runs_jsonl_byte_identical(store: Store) -> None:
     a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
     intent = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="hi")
-    store.report_delivery(intent["id"], b_run, b_tok, "socket")
+    store.report_receipt(intent["id"], b_run, b_tok, "prepared", "hook")
     c, c_run, c_tok = _live_task(store, repo="rc")
     before = store.runs_path.read_text()
     state_before = store.get_intent(intent["id"])["state"]
@@ -1137,9 +1099,9 @@ def test_live_run_of_another_task_refused_leaves_runs_jsonl_byte_identical(store
     with pytest.raises(TransitionError):
         store.create_intent(a, c_run, c_tok, kind="request", to_task_id=b, body="x")
     with pytest.raises(TransitionError, match="run is not the recipient's run"):
-        store.report_delivery(intent["id"], c_run, c_tok, "socket")
+        store.report_receipt(intent["id"], c_run, c_tok, "prepared", "hook")
     with pytest.raises(TransitionError, match="run is not the recipient's run"):
-        store.ack_intent(intent["id"], c_run, c_tok)
+        store.ack_intent(intent["id"], c_run, c_tok, source="cli")
 
     assert store.runs_path.read_text() == before
     assert store.get_intent(intent["id"])["state"] == state_before
@@ -1159,7 +1121,7 @@ def test_body_rule_refusal_after_ripe_settle_writes_nothing(store: Store) -> Non
     assert store.get_intent(intent["id"])["state"] == state_before
 
 
-def test_three_refused_calls_then_one_accepted_leave_one_expiry_line(store: Store) -> None:
+def test_refused_calls_cannot_duplicate_the_original_receiver_terminal_record(store: Store) -> None:
     a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
     intent = _ripe_for_expiry(store, a, a_run, a_tok, b, b_run, b_tok)
 
@@ -1168,16 +1130,16 @@ def test_three_refused_calls_then_one_accepted_leave_one_expiry_line(store: Stor
     with pytest.raises(KeyError):
         store.requests_for_run("AO-999-r1", "tok")
     with pytest.raises(TransitionError):
-        store.ack_intent(intent["id"], b_run, "wrong")
+        store.ack_intent(intent["id"], b_run, "wrong", source="cli")
 
     store.requests_for_run(a_run, a_tok)
 
     lines = [json.loads(line) for line in store.runs_path.read_text().splitlines()]
     expiry_lines = [line for line in lines
-                    if line["outcome"] == "intent:expired"
-                    and line["receipt"]["intent_id"] == intent["id"]]
+                    if line["outcome"] == "intent:terminal"
+                    and line["receipt"]["id"] == intent["id"]]
     assert len(expiry_lines) == 1
-    assert store.get_intent(intent["id"])["state"] == "expired"
+    assert store.get_intent(intent["id"])["terminal_reason"] == "receiver_closed"
 
 
 # -- D34: a waiting notice reaches a silent live recipient too -----------------
@@ -1197,7 +1159,7 @@ def test_waiting_notice_for_live_recipient_that_never_acknowledges(store: Store)
     assert matching[0]["notice"] == "waiting"
     # b's run stayed live throughout: the notice does not depend on it ending.
     assert store.get_run(b_run)["status"] == "running"
-    assert store.get_intent(intent["id"])["state"] in ("stored", "delivered")
+    assert store.get_intent(intent["id"])["state"] in ("stored", "prepared")
 
 
 # == integration checks (parallel step 3, unit U1) ============================
@@ -1705,15 +1667,15 @@ def test_retract_operator_form_works(store: Store) -> None:
     assert retracted["retracted_at"] is not None
 
 
-# -- ack_intent, report_delivery, reply refused on a new kind -------------------
+# -- ack_intent, report_receipt, reply refused on a new kind --------------------
 
-def test_ack_report_delivery_reply_refused_on_new_kind(store: Store) -> None:
+def test_ack_report_receipt_reply_refused_on_new_kind(store: Store) -> None:
     (a, a_run, a_tok), (b, b_run, b_tok) = _same_repo_tasks(store, "repo-newkind-refusals")
     row = store.declare_blocker(a, body="stuck", run_id=a_run, claim_token=a_tok)
     with pytest.raises(TransitionError, match="not a request"):
-        store.ack_intent(row["id"], a_run, a_tok)
+        store.ack_intent(row["id"], a_run, a_tok, source="cli")
     with pytest.raises(TransitionError, match="not a request"):
-        store.report_delivery(row["id"], a_run, a_tok, "socket")
+        store.report_receipt(row["id"], a_run, a_tok, "prepared", "hook")
     with pytest.raises(TransitionError, match="not a request"):
         store.create_intent(b, b_run, b_tok, kind="request", reply_to=row["id"], body="reply")
 
@@ -2370,7 +2332,7 @@ def _run_event(seq: int, **changes):
 def test_run_events_status_event_on_finish(store: Store) -> None:
     _, run_id, token = force_task_status(store, "running")
     store.finish_run(run_id, token, status="review", report="done")
-    events = store.read_run_events(run_id)["events"]
+    events = [event for event in store.read_run_events(run_id)["events"] if event["type"] == "status"]
     assert len(events) == 1
     assert events[0]["type"] == "status"
     assert events[0]["runner_seq"] is None
@@ -2499,8 +2461,8 @@ def test_run_events_count_trim(store: Store, monkeypatch: pytest.MonkeyPatch) ->
     assert [event["seq"] for event in feed["events"]] == [3, 4, 5]
     store.finish_run(run_id, token, status="review", report="done")
     feed = store.read_run_events(run_id)
-    assert (feed["first_seq"], feed["last_seq"]) == (4, 6)
-    assert [event["seq"] for event in feed["events"]] == [4, 5, 6]
+    assert (feed["first_seq"], feed["last_seq"]) == (5, 7)
+    assert [event["seq"] for event in feed["events"]] == [5, 6, 7]
 
 
 def test_run_events_byte_trim_keeps_sum_under_cap(store: Store, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2519,17 +2481,15 @@ def test_run_events_byte_trim_keeps_sum_under_cap(store: Store, monkeypatch: pyt
         assert db.execute("SELECT SUM(bytes) FROM run_events WHERE run_id=?", (run_id,)).fetchone()[0] <= cap
     store.finish_run(run_id, token, status="review", report="done")
     feed = store.read_run_events(run_id)
-    assert [event["seq"] for event in feed["events"]] == [6]
-    assert feed["first_seq"] == 6
     with store.connection() as db:
-        assert db.execute("SELECT SUM(bytes) FROM run_events WHERE run_id=?", (run_id,)).fetchone()[0] <= cap
+        assert db.execute("SELECT COALESCE(SUM(bytes),0) FROM run_events WHERE run_id=?", (run_id,)).fetchone()[0] <= cap
 
 
 @pytest.mark.parametrize("status", ["claimed", "running"])
 def test_run_events_status_event_on_cancel(store: Store, status: str) -> None:
     task_id, run_id, _ = force_task_status(store, status)
     store.cancel_task(task_id)
-    events = store.read_run_events(run_id)["events"]
+    events = [event for event in store.read_run_events(run_id)["events"] if event["type"] == "status"]
     assert len(events) == 1 and events[0]["runner_seq"] is None
     assert events[0]["type"] == "status"
     assert events[0]["payload"] == {"status": "cancelled", "error": None}
@@ -2537,20 +2497,21 @@ def test_run_events_status_event_on_cancel(store: Store, status: str) -> None:
 
 def test_run_events_status_event_on_lease_expiry(store: Store) -> None:
     _, run, expired_at = _expired_run(store)
-    events = store.read_run_events(run["id"])["events"]
+    feed = store.read_run_events(run["id"])["events"]
+    events = [event for event in feed if event["type"] == "status"]
     assert len(events) == 1 and events[0]["runner_seq"] is None
     assert events[0]["type"] == "status"
     assert events[0]["payload"] == {"status": "blocked", "error": "lease expired"}
     assert store.expire_task_leases(now=expired_at) == []
-    assert store.read_run_events(run["id"])["events"] == events
+    assert store.read_run_events(run["id"])["events"] == feed
 
 
 def test_run_events_second_status_event_on_late_result(store: Store) -> None:
     _, run, expired_at = _expired_run(store)
     store.finish_run(run["id"], run["claim_token"], status="review", report="late",
                      now=expired_at + timedelta(seconds=1))
-    events = store.read_run_events(run["id"])["events"]
-    assert [event["seq"] for event in events] == [1, 2]
+    events = [event for event in store.read_run_events(run["id"])["events"] if event["type"] == "status"]
+    assert [event["seq"] for event in events] == [1, 3]
     assert all(event["type"] == "status" and event["runner_seq"] is None for event in events)
     assert [event["payload"] for event in events] == [
         {"status": "blocked", "error": "lease expired"}, {"status": "review", "error": None}]
@@ -2588,41 +2549,42 @@ def test_run_events_intent_events_on_five_writers(store: Store) -> None:
     replacement = _claim(store, a)
     a_run, a_tok = replacement["id"], replacement["claim_token"]
     store.start_run(a_run, a_tok, base_commit="a", branch="b", worktree="/x")
+    store.update_receiver(a_run, a_tok, action="receiving", owner="replacement", reason="native_start")
     body = b_tok + "é" * (EVENT_TEXT_CAP + 1)
     original = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body=body)
-    stored = {"intent_id": original["id"], "from": a, "to": b, "state": "stored",
+    stored = {"intent_id": original["id"], "from": a, "to": b, "state": "stored", "stage": "stored",
               "kind": "request", "reply_to": None, "via": None,
-              "body": body[:EVENT_TEXT_CAP].replace(b_tok, "***"), "truncated": True}
+              "body": body[:EVENT_TEXT_CAP].replace(b_tok, "***"), "truncated": True,
+              "run_id": a_run, "to_run_id": b_run, "admission": "accepted",
+              "terminal_reason": None, "terminal_at": None}
     for rid in (a_run, b_run):
         assert _intent_feed(store, rid, original["id"]) == [stored]
-    store.report_delivery(original["id"], b_run, b_tok, "inbox")
-    for rid in (a_run, b_run):
-        assert _intent_feed(store, rid, original["id"]) == [stored]
-    store.report_delivery(original["id"], b_run, b_tok, "socket")
-    store.report_delivery(original["id"], b_run, b_tok, "queue")
-    store.ack_intent(original["id"], b_run, b_tok)
-    store.ack_intent(original["id"], b_run, b_tok)
+    store.report_receipt(original["id"], b_run, b_tok, "prepared", "hook")
+    # A repeated preparation is a count on the same fact, not a second event.
+    store.report_receipt(original["id"], b_run, b_tok, "prepared", "inbox_tool")
+    store.ack_intent(original["id"], b_run, b_tok, source="cli")
+    store.ack_intent(original["id"], b_run, b_tok, source="cli")
     store.create_intent(b, b_run, b_tok, kind="request", reply_to=original["id"], body="answer")
     for rid in (a_run, b_run):
         events = _intent_feed(store, rid, original["id"])
-        assert events == [stored, dict(stored, state="delivered", via="socket"),
-                          dict(stored, state="acknowledged", via="queue"),
-                          dict(stored, state="answered", via="queue")]
+        assert events == [stored, dict(stored, state="prepared", stage="prepared", via="hook"),
+                          dict(stored, state="acknowledged", stage="acknowledged", via="hook"),
+                          dict(stored, state="answered", stage="answered", via="hook")]
     doomed = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="no ack")
-    for _ in range(INTENT_ATTEMPTS):
-        store.report_delivery(doomed["id"], b_run, b_tok, "socket")
+    store.report_receipt(doomed["id"], b_run, b_tok, "prepared", "hook")
     store.sweep_intents(now=datetime.now(timezone.utc) + timedelta(seconds=901))
     for rid in (a_run, b_run):
-        assert [event["state"] for event in _intent_feed(store, rid, doomed["id"])] == [
-            "stored", "delivered", "undeliverable"]
+        assert [event["state"] for event in _intent_feed(store, rid, doomed["id"])] == ["stored", "prepared"]
     expiring = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="ends")
     store.finish_run(b_run, b_tok, status="review", report="done")
     terminal_feed = store.read_run_events(b_run)
     store.requeue_task(b, "ready")
     new_b = _claim(store, b)
     store.sweep_intents()
-    assert [event["state"] for event in _intent_feed(store, a_run, expiring["id"])] == ["stored", "expired"]
-    assert [event["state"] for event in _intent_feed(store, new_b["id"], expiring["id"])] == ["expired"]
+    terminal = _intent_feed(store, a_run, expiring["id"])
+    assert [(event["state"], event["stage"]) for event in terminal] == [("stored", "stored"), ("stored", "undelivered")]
+    assert terminal[-1]["terminal_reason"] == "receiver_closed"
+    assert _intent_feed(store, new_b["id"], expiring["id"]) == []
     assert store.read_run_events(b_run) == terminal_feed
     assert store.read_run_events(old_run) == old_feed
 
@@ -2630,15 +2592,17 @@ def test_run_events_intent_events_on_five_writers(store: Store) -> None:
 def test_run_events_reply_stored_event_carries_reply(store: Store) -> None:
     a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
     original = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="question")
-    store.report_delivery(original["id"], b_run, b_tok, "socket")
+    store.report_receipt(original["id"], b_run, b_tok, "prepared", "hook")
     reply = store.create_intent(b, b_run, b_tok, kind="request", reply_to=original["id"], body="reply")
     for rid in (a_run, b_run):
         answered = _intent_feed(store, rid, original["id"])[-1]
         assert answered["state"] == "answered" and answered["body"] == "question"
         assert answered["reply_to"] is None
         assert _intent_feed(store, rid, reply["id"]) == [{
-            "intent_id": reply["id"], "from": b, "to": a, "state": "stored", "kind": "request",
-            "reply_to": original["id"], "via": None, "body": "reply"}]
+            "intent_id": reply["id"], "from": b, "to": a, "state": "stored", "stage": "stored", "kind": "request",
+            "reply_to": original["id"], "via": None, "body": "reply",
+            "run_id": b_run, "to_run_id": a_run, "admission": "accepted",
+            "terminal_reason": None, "terminal_at": None}]
 
 
 def test_run_events_finish_notice_token_scrubbed(store: Store) -> None:
@@ -2655,11 +2619,11 @@ def test_run_events_finish_notice_token_scrubbed(store: Store) -> None:
     assert payload["kind"] == "notice" and payload["state"] == "stored"
     assert "child *** parent ***" in payload["body"]
     assert run["claim_token"] not in json.dumps(payload) and parent_tok not in json.dumps(payload)
-    assert _intent_feed(store, run["id"], notice["id"]) == []
-    store.report_delivery(notice["id"], parent_run, parent_tok, "socket")
-    store.ack_intent(notice["id"], parent_run, parent_tok)
+    assert _intent_feed(store, run["id"], notice["id"]) == [payload]
+    store.report_receipt(notice["id"], parent_run, parent_tok, "prepared", "hook")
+    store.ack_intent(notice["id"], parent_run, parent_tok, source="cli")
     assert [event["state"] for event in _intent_feed(store, parent_run, notice["id"])] == [
-        "stored", "delivered", "acknowledged"]
+        "stored", "prepared", "acknowledged"]
 
 
 @pytest.mark.parametrize("field,text", [("body", "\x01" * 4000), ("text", "é" * 20000)])
@@ -3007,3 +2971,778 @@ def test_legacy_hashes_survive_the_execution_field(store: Store) -> None:
     assert store.complete_task(task["id"])["status"] == "done"
     twin = store.create_task(repo="r", title="t", brief="b", acceptance=["true"], execution="interactive")
     assert twin["spec_hash"] != expected
+
+
+# -- required checks (verification gates U2) -------------------------------------
+
+HEAD = "c" * 40
+
+
+def _gated_review_run(store: Store, *, required: list[str] | None = None, offered: list[str] | None = None,
+                result_commit: str = HEAD) -> tuple[str, dict[str, Any]]:
+    task = store.create_task(repo="r", title="t", brief="b", acceptance=["true"], required_checks=required)
+    store.ready_task(task["id"])
+    run = _claim(store, task["id"], **({"required_checks": offered} if offered is not None else {}))
+    store.start_run(run["id"], run["claim_token"], base_commit="a" * 40, branch=f"ao/{task['id']}", worktree="/x")
+    store.finish_run(run["id"], run["claim_token"], status="review", report="ok", result_commit=result_commit,
+                     verdict="pass")
+    return task["id"], store.get_run(run["id"])
+
+
+def test_required_checks_join_the_spec_hash_only_when_set(store: Store) -> None:
+    from agent_os.store import _spec_hash
+    plain = store.create_task(repo="r", title="t", brief="b", acceptance=["true"])
+    assert plain["spec_hash"] == _spec_hash("r", "b", ["true"], "", 1, "any")  # every existing hash stays valid
+    assert plain["required_checks"] == []
+    gated = store.create_task(repo="r", title="t", brief="b", acceptance=["true"], required_checks=["review", "review"])
+    assert gated["required_checks"] == ["review"]
+    assert gated["spec_hash"] == _spec_hash("r", "b", ["true"], "", 1, "any", "headless", ["review"]) != plain["spec_hash"]
+    edited = store.edit_task(gated["id"], tier=2)  # an edit of another field keeps the checks in the hash
+    assert edited["spec_hash"] == _spec_hash("r", "b", ["true"], "", 2, "any", "headless", ["review"])
+
+
+@pytest.mark.parametrize("names", [["Review"], ["-x"], ["a" * 41], ["ok", "has space"], "review", [3]])
+def test_required_check_names_are_refused_unless_well_formed(store: Store, names) -> None:
+    with pytest.raises(ValueError):
+        store.create_task(repo="r", title="t", brief="b", acceptance=["true"], required_checks=names)
+
+
+def test_claim_stores_the_offered_list_with_the_task_names(store: Store) -> None:
+    _, run = _gated_review_run(store, required=["review"], offered=["merge-check", "review"])
+    assert run["required_checks"] == ["merge-check", "review"]
+    _, older = _gated_review_run(store, required=["review"])  # a runner that sends no list keeps the task's names
+    assert older["required_checks"] == ["review"]
+    _, none = _gated_review_run(store)
+    assert none["required_checks"] == [] and none["checks"] == []
+
+
+def test_accept_waits_for_each_required_check_on_the_runs_head(store: Store) -> None:
+    task_id, run = _gated_review_run(store, required=["review", "real-service"])
+    assert [c["state"] for c in run["checks"]] == ["missing", "missing"]
+    with pytest.raises(TransitionError, match=r"^required checks missing: review, real-service$"):
+        store.complete_task(task_id)
+    with pytest.raises(TransitionError, match=r"^commit dddddddddddd is not the head of AO-1-r1 \(cccccccccccc\)$"):
+        store.record_check(task_id, "review", commit="d" * 40, note="AO-8 review")
+    store.record_check(task_id, "review", commit=HEAD, note="AO-8 review, reviews/AO-1.md")
+    with pytest.raises(TransitionError, match=r"^required checks missing: real-service$"):
+        store.complete_task(task_id)
+    store.record_check(task_id, "real-service", commit=HEAD, status="waived", note="no service touched")
+    checks = store.get_run(run["id"])["checks"]
+    assert [(c["name"], c["state"], c["detail"]) for c in checks] == [
+        ("review", "passed", "AO-8 review, reviews/AO-1.md"), ("real-service", "waived", "no service touched")]
+    assert store.complete_task(task_id)["status"] == "done"
+    events = [json.loads(line)["receipt"] for line in store.runs_path.read_text().splitlines()]
+    assert [e["event"] for e in events if e["event"].startswith("check:")] == ["check:passed", "check:waived"]
+
+
+def test_a_record_for_another_head_is_stale(store: Store) -> None:
+    task_id, run = _gated_review_run(store, required=["review"])
+    store.record_check(task_id, "review", commit=HEAD, note="reviewed the result commit")
+    store.annotate_run(run["id"], pr_head_sha="e" * 40)  # the head moved to a PR head after the record
+    [check] = store.get_run(run["id"])["checks"]
+    assert check["state"] == "stale" and check["detail"] == "recorded for cccccccccccc: reviewed the result commit"
+    with pytest.raises(TransitionError, match=r"^required checks missing: review$"):
+        store.complete_task(task_id)
+    store.record_check(task_id, "review", commit="e" * 40, note="re-reviewed the PR head")  # replaces the record
+    assert store.get_run(run["id"])["checks"][0]["state"] == "passed"
+
+
+def test_a_new_run_starts_with_no_records(store: Store) -> None:
+    task_id, run = _gated_review_run(store, required=["review"])
+    store.record_check(task_id, "review", commit=HEAD, note="first attempt reviewed")
+    store.reject_task(task_id, "again")
+    store.ready_task(task_id)
+    second = _claim(store, task_id)
+    store.start_run(second["id"], second["claim_token"], base_commit="a" * 40, branch="b", worktree="/x")
+    store.finish_run(second["id"], second["claim_token"], status="review", report="ok", result_commit=HEAD)
+    with pytest.raises(TransitionError, match=r"^required checks missing: review$"):
+        store.complete_task(task_id)
+
+
+def test_merge_check_is_computed_from_the_integration_record(store: Store) -> None:
+    task_id, run = _gated_review_run(store, required=["merge-check"])
+    assert run["checks"][0] == {"name": "merge-check", "state": "missing", "detail": "no integration check",
+                                "computed": True}
+    with pytest.raises(ValueError, match="merge-check is computed"):
+        store.record_check(task_id, "merge-check", commit=HEAD, note="trust me")
+    store.record_integration(task_id, run["id"], head_sha=HEAD, base_branch="main", base_sha="b" * 40,
+                             status="failed", output="boom", worker="w")
+    assert store.get_run(run["id"])["checks"][0]["detail"] == "integration AO-1-r1-c1 failed"
+    with pytest.raises(TransitionError, match=r"^required checks missing: merge-check$"):
+        store.complete_task(task_id)
+    store.record_integration(task_id, run["id"], head_sha=HEAD, base_branch="main", base_sha="b" * 40,
+                             status="passed", output="ok", worker="w")
+    assert store.get_run(run["id"])["checks"][0]["state"] == "passed"
+    assert store.complete_task(task_id)["status"] == "done"
+
+
+def test_a_github_reported_merge_is_never_refused(store: Store) -> None:
+    task_id, run = _gated_review_run(store, required=["review"])
+    done = store.complete_task(task_id, merge_commit="m" * 40, run_id=run["id"])
+    assert done["status"] == "done" and done["runs"][0]["merge_commit"] == "m" * 40
+
+
+def test_a_task_without_required_checks_accepts_as_before(store: Store) -> None:
+    task_id, _ = _gated_review_run(store)
+    assert store.complete_task(task_id)["status"] == "done"
+
+
+@pytest.mark.parametrize("fields, error", [
+    ({"name": "Review"}, ValueError), ({"commit": "c" * 39}, ValueError), ({"commit": "C" * 40}, ValueError),
+    ({"note": "  "}, ValueError), ({"note": "x" * 2001}, ValueError), ({"status": "failed"}, ValueError),
+])
+def test_record_check_refuses_malformed_input(store: Store, fields, error) -> None:
+    task_id, _ = _gated_review_run(store, required=["review"])
+    with pytest.raises(error):
+        store.record_check(task_id, **{"name": "review", "commit": HEAD, "note": "ok", **fields})
+
+
+def test_record_check_needs_a_review_run(store: Store) -> None:
+    task = store.create_task(repo="r", title="t", brief="b", acceptance=["true"], required_checks=["review"])
+    with pytest.raises(TransitionError, match="^no review run to record a check for$"):
+        store.record_check(task["id"], "review", commit=HEAD, note="early")
+
+
+# -- lost tests and the regression guard (verification gates U3) ---------------------------------
+
+LOST = [{"test": "tests.test_a::test_b", "after": "skipped"}, {"test": "tests.test_a::test_c", "after": "missing"}]
+
+
+def _lost_review(store: Store, *, lost=LOST, required: list[str] | None = None) -> tuple[str, str]:
+    task = store.create_task(repo="r", title="t", brief="b", acceptance=["true"], required_checks=required)
+    store.ready_task(task["id"])
+    run = _claim(store, task["id"])
+    store.start_run(run["id"], run["claim_token"], base_commit="a" * 40, branch="b", worktree="/x")
+    store.finish_run(run["id"], run["claim_token"], status="review", report="ok", result_commit=HEAD,
+                     verdict="pass", test_changes=lost)
+    return task["id"], run["id"]
+
+
+def test_lost_tests_hold_the_accept_until_a_reason(store: Store) -> None:
+    # Proof table, U3 row 1 (bus half): the run reached review; the accept is refused, naming the test.
+    task_id, run_id = _lost_review(store)
+    run = store.get_run(run_id)
+    assert run["test_changes"] == LOST
+    assert run["checks"] == [{"name": "test-changes", "state": "missing", "computed": False,
+                              "detail": "2 passed before the agent and not after: tests.test_a::test_b (skipped), "
+                                        "tests.test_a::test_c (missing)"}]
+    with pytest.raises(TransitionError, match=r"^required checks missing: test-changes$"):
+        store.complete_task(task_id)
+    store.record_check(task_id, "test-changes", commit=HEAD, status="waived",
+                       note="test_b skips on purpose now; test_c was renamed to test_c2")
+    assert store.complete_task(task_id)["status"] == "done"
+
+
+def test_lost_tests_join_the_other_required_checks(store: Store) -> None:
+    task_id, run_id = _lost_review(store, required=["review"])
+    assert [c["name"] for c in store.get_run(run_id)["checks"]] == ["review", "test-changes"]
+    with pytest.raises(TransitionError, match=r"^required checks missing: review, test-changes$"):
+        store.complete_task(task_id)
+
+
+def test_no_lost_tests_add_no_check(store: Store) -> None:
+    for lost in (None, []):
+        task_id, run_id = _lost_review(store, lost=lost)
+        assert store.get_run(run_id)["test_changes"] is None and store.get_run(run_id)["checks"] == []
+        assert store.complete_task(task_id)["status"] == "done"
+
+
+def test_test_changes_cannot_be_configured_but_can_be_recorded(store: Store) -> None:
+    with pytest.raises(ValueError, match="test-changes is added by AOS"):
+        store.create_task(repo="r", title="t", brief="b", acceptance=["true"], required_checks=["test-changes"])
+
+
+@pytest.mark.parametrize("lost", [
+    "t::a", [{"test": "t::a"}], [{"test": "t::a", "after": "gone"}], [{"test": " ", "after": "missing"}],
+    [{"test": "t::a", "after": "missing", "extra": 1}], [{"test": "t::a", "after": "missing"}] * 201,
+])
+def test_finish_refuses_malformed_test_changes(store: Store, lost) -> None:
+    with pytest.raises(ValueError):
+        _lost_review(store, lost=lost)
+
+
+def test_regression_guard_joins_the_spec_hash_only_when_set(store: Store) -> None:
+    from agent_os.store import _spec_hash
+    plain = store.create_task(repo="r", title="t", brief="b", acceptance=["true"])
+    assert plain["regression_guard"] is False
+    assert plain["spec_hash"] == _spec_hash("r", "b", ["true"], "", 1, "any")
+    guard = store.create_task(repo="r", title="t", brief="b", acceptance=["true"], regression_guard=True)
+    assert guard["regression_guard"] is True
+    assert guard["spec_hash"] == _spec_hash("r", "b", ["true"], "", 1, "any", "headless", None, True)
+    assert store.edit_task(guard["id"], tier=2)["spec_hash"] == _spec_hash("r", "b", ["true"], "", 2, "any",
+                                                                            "headless", None, True)
+
+
+@pytest.mark.parametrize("status, receiver_state, submission, lease_delta, reason", [
+    ("claimed", "pending", None, 0, "receiver_not_ready"),
+    ("running", "pending", None, 0, "receiver_not_ready"),
+    ("running", "closing", None, 0, "receiver_closed"),
+    ("running", "closed", None, 0, "receiver_closed"),
+    ("running", "receiving", "{}", 0, "receiver_closed"),
+    ("running", "receiving", None, -1, "lease_expired"),
+    ("running", "closed", "{}", -1, "lease_expired"),
+    ("running", "receiving", None, 0, None),
+])
+def test_admission_cause_boundaries_are_retained_in_history(
+        store: Store, status, receiver_state, submission, lease_delta, reason) -> None:
+    task, run, token = _live_task(store, repo="recipient")
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    # Seed overlapping persisted states to exercise cause precedence independently
+    # of which lifecycle writer normally establishes each state.
+    with store.connection() as db:
+        db.execute("UPDATE task_runs SET status=?,receiver_state=?,submission=?,lease_until=? WHERE id=?",
+                   (status, receiver_state, submission,
+                    (now + timedelta(seconds=lease_delta)).isoformat().replace("+00:00", "Z"), run))
+    row = store.create_operator_intent(to_task_id=task, body="boundary", now=now)
+    assert store.get_intent(row["id"]) == row
+    assert row["to_run_id"] == run
+    assert row["terminal_reason"] == reason
+    assert row["admission"] == ("accepted" if reason is None else "unavailable")
+    assert row["terminal_at"] == (None if reason is None else now.isoformat().replace("+00:00", "Z"))
+    first = store.get_run(run)
+    store.create_operator_intent(to_task_id=task, body="repeat", now=now)
+    assert store.get_intent(row["id"]) == row
+    after = store.get_run(run)
+    for field in ("receiver_reason", "receiver_opened_at", "receiver_closing_at", "receiver_closed_at"):
+        assert after[field] == first[field]
+
+
+@pytest.mark.parametrize("count, reason", [(0, "no_live_receiver"), (2, "ambiguous_receiver")])
+def test_task_addressed_refusal_never_invents_exact_receiver(store: Store, count, reason) -> None:
+    task = store.create_task(repo="recipient", title="recipient")["id"]
+    if count:
+        # Public claims prevent multiple live runs; guard imported/corrupt history
+        # rather than choosing an arbitrary owner when that invariant is absent.
+        for index in range(count):
+            _, run, _ = _live_task(store, repo=f"duplicate-{index}")
+            with store.connection() as db:
+                db.execute("UPDATE task_runs SET task_id=? WHERE id=?", (task, run))
+    row = store.create_operator_intent(to_task_id=task, body="no arbitrary owner")
+    assert row["admission"] == "unavailable" and row["terminal_reason"] == reason
+    assert row["to_run_id"] is None and row["terminal_at"]
+    assert store.get_intent(row["id"]) == row
+
+
+@pytest.mark.parametrize("identity, reason", [
+    (None, "original_run_unknown"), ("   ", "original_run_unknown"),
+    ("missing", "receiver_missing"), ("foreign", "recipient_mismatch"),
+    ("ended", "receiver_closed"),
+])
+def test_historical_original_identity_is_not_repaired_by_reply_routing(store: Store, identity, reason) -> None:
+    task, run, token = _live_task(store, repo="asker")
+    question = store.create_intent(task, run, token, kind="request", to_task_id="operator", body="question")
+    assert question["admission"] == "accepted" and question["to_run_id"] is None
+    assert question["terminal_at"] is None and question["terminal_reason"] is None
+    attempted = identity
+    if identity in ("foreign", "ended"):
+        other_task, attempted, other_token = _live_task(store, repo="historical")
+        if identity == "ended":
+            store.finish_run(attempted, other_token, status="review", report="done")
+            with store.connection() as db:
+                db.execute("UPDATE task_runs SET task_id=? WHERE id=?", (task, attempted))
+    # Historical originals can lack run identity or reference missing/wrong-task
+    # rows. Never synthesize ownership from the current live replacement above.
+    with store.connection() as db:
+        db.execute("UPDATE task_intents SET run_id=? WHERE id=?", (attempted, question["id"]))
+    answer = store.create_operator_intent(reply_to=question["id"], body="answer")
+    assert answer["admission"] == "unavailable" and answer["terminal_reason"] == reason
+    assert answer["to_run_id"] == (None if not attempted or not attempted.strip() else attempted)
+    assert answer["terminal_at"] and store.get_intent(answer["id"]) == answer
+    original = store.get_intent(question["id"])
+    assert original["state"] == "answered" and original["answered_at"]
+    assert original["terminal_reason"] is None and original["terminal_at"] is None
+    assert store.requests_for_run(run, token) == []
+
+
+@pytest.mark.parametrize("first", ["send", "close"])
+def test_exact_receiver_admission_serializes_both_writer_orders(store: Store, monkeypatch, first: str) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
+    other = Store(store.data_dir)
+    entered, release, second_started = Event(), Event(), Event()
+    method = "_admit_request" if first == "send" else "_transition_receiver"
+    original = getattr(store, method)
+
+    def held(*args, **kwargs):
+        result = original(*args, **kwargs)
+        entered.set()
+        assert release.wait(5)
+        return result
+
+    monkeypatch.setattr(store, method, held)
+
+    def send(target):
+        return target.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="race")
+
+    def close(target):
+        return target.update_receiver(b_run, b_tok, action="closed", reason="native_end")
+
+    def second():
+        second_started.set()
+        return close(other) if first == "send" else send(other)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        one = pool.submit(send if first == "send" else close, store)
+        assert entered.wait(5)
+        two = pool.submit(second)
+        assert second_started.wait(5)
+        release.set()
+        first_result, second_result = one.result(5), two.result(5)
+    row = store.get_intent((first_result if first == "send" else second_result)["id"])
+    assert row["to_run_id"] == b_run
+    assert row["admission"] == ("accepted" if first == "send" else "unavailable")
+    assert row["terminal_reason"] == "receiver_closed"
+    assert store.get_run(b_run)["receiver_reason"] == "native_end"
+    assert store.update_receiver(b_run, b_tok, action="closed", reason="later")["receiver_reason"] == "native_end"
+
+
+@pytest.mark.parametrize("state", ["stored", "prepared", "acknowledged"])
+@pytest.mark.parametrize("kind", ["request", "notice"])
+def test_close_accounts_for_every_unanswered_message_without_erasing_evidence(store: Store, state: str, kind: str) -> None:
+    a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
+    row = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="retained")
+    if kind == "notice":
+        with store.connection() as db:
+            db.execute("UPDATE task_intents SET kind='notice' WHERE id=?", (row["id"],))
+    if state == "prepared":
+        store.report_receipt(row["id"], b_run, b_tok, "prepared", "hook")
+    elif state == "acknowledged":
+        store.ack_intent(row["id"], b_run, b_tok, source="cli")
+    before = store.get_intent(row["id"])
+    closed = store.update_receiver(b_run, b_tok, action="closed", owner=f"native-{b_run}", reason="native_end")
+    after = store.get_intent(row["id"])
+    for field in ("state", "delivered_at", "delivered_via", "delivery_attempts", "acked_at", "answered_at"):
+        assert after[field] == before[field]
+    assert after["terminal_reason"] == "receiver_closed" and after["terminal_at"]
+    assert store.requests_for_run(b_run, b_tok) == []
+    with pytest.raises(TransitionError):
+        store.report_receipt(row["id"], b_run, b_tok, "prepared", "hook")
+    if state == "acknowledged":
+        assert store.ack_intent(row["id"], b_run, b_tok, source="cli") == after
+    else:
+        with pytest.raises(TransitionError):
+            store.ack_intent(row["id"], b_run, b_tok, source="cli")
+    store.heartbeat_run(b_run, b_tok, lease_seconds=600)
+    store.progress_run(b_run, b_tok, stage="cleanup", cleanup_status="complete")
+    repeated = store.update_receiver(b_run, b_tok, action="closed", reason="cleanup")
+    for field in ("receiver_state", "receiver_reason", "receiver_closing_at", "receiver_closed_at"):
+        assert repeated[field] == closed[field]
+    with pytest.raises(TransitionError):
+        store.update_receiver(b_run, b_tok, action="receiving", owner=f"native-{b_run}", reason="native_start")
+
+
+def test_answer_to_original_run_is_retained_unavailable_without_rerouting(store: Store) -> None:
+    a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
+    question = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="question")
+    store.ack_intent(question["id"], b_run, b_tok, source="cli")
+    store.finish_run(a_run, a_tok, status="review", report="done")
+    store.requeue_task(a, "ready")
+    new = _claim(store, a)
+    store.start_run(new["id"], new["claim_token"], base_commit="a", branch="b", worktree="/new")
+    store.update_receiver(new["id"], new["claim_token"], action="receiving", owner="new", reason="native_start")
+    reply = store.create_intent(b, b_run, b_tok, kind="request", reply_to=question["id"], body="answer")
+    assert store.get_intent(question["id"])["state"] == "answered"
+    assert reply["to_run_id"] == a_run and reply["admission"] == "unavailable"
+    assert reply["terminal_reason"] == "receiver_closed"
+    assert store.requests_for_run(new["id"], new["claim_token"]) == []
+    with pytest.raises(TransitionError):
+        store.intent_for_waiter(question["id"], new["id"], new["claim_token"])
+    with pytest.raises(TransitionError):
+        store.ack_intent(reply["id"], new["id"], new["claim_token"], source="cli")
+    store.update_receiver(b_run, b_tok, action="closed", reason="native_end")
+    assert store.get_intent(question["id"])["terminal_reason"] is None
+
+
+def test_pending_receiver_needs_authenticated_running_native_owner_and_emits_only_real_transitions(store: Store) -> None:
+    task = store.create_task(repo="receiver", title="t", brief="b", acceptance=["true"])
+    store.ready_task(task["id"])
+    run = _claim(store, task["id"])
+    assert store.get_run(run["id"])["receiver_state"] == "pending"
+    with pytest.raises(TransitionError):
+        store.update_receiver(run["id"], run["claim_token"], action="receiving", owner="owner", reason="native_start")
+    store.start_run(run["id"], run["claim_token"], base_commit="a", branch="b", worktree="/x")
+    before = store.get_run(run["id"])
+    with pytest.raises(TransitionError):
+        store.update_receiver(run["id"], "wrong", action="closed", reason="native_end")
+    assert store.get_run(run["id"]) == before
+    opened = store.update_receiver(run["id"], run["claim_token"], action="receiving", owner="owner", reason="native_start")
+    assert opened["receiver_reason"] is None
+    assert store.update_receiver(run["id"], run["claim_token"], action="receiving", owner="owner", reason="native_start") == opened
+    with pytest.raises(TransitionError):
+        store.update_receiver(run["id"], run["claim_token"], action="receiving", owner="different", reason="native_start")
+    with pytest.raises(TransitionError):
+        store.update_receiver(run["id"], run["claim_token"], action="closed", owner="different", reason="native_end")
+    store.update_receiver(run["id"], run["claim_token"], action="closed", owner="owner", reason="native_end")
+    events = store.read_run_events(run["id"])["events"]
+    assert [event["payload"]["receiver_state"] for event in events if event["type"] == "receiver"] == ["receiving", "closed"]
+    with pytest.raises(ValueError):
+        store.append_run_events(run["id"], run["claim_token"], [
+            {"seq": 1, "type": "receiver", "at": "2026-11-01T00:00:00Z", "payload": {}}])
+
+
+def test_legacy_receiver_migration_is_one_shot_and_serializes_constructors(store: Store) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    a, a_run, a_tok, b, b_run, b_tok = _two_live_tasks(store)
+    peer = store.create_intent(a, a_run, a_tok, kind="request", to_task_id=b, body="historical")
+    store.ack_intent(peer["id"], b_run, b_tok, source="cli")
+    question = store.create_intent(a, a_run, a_tok, kind="request", to_task_id="operator", body="operator question")
+    before = store.get_intent(peer["id"])
+    with store.connection() as db:
+        db.execute("DROP INDEX intents_exact_recipient")
+        for column in ("to_run_id", "admission", "terminal_at", "terminal_reason"):
+            db.execute(f"ALTER TABLE task_intents DROP COLUMN {column}")
+        for column in ("receiver_state", "receiver_owner", "receiver_opened_at",
+                       "receiver_closing_at", "receiver_closed_at", "receiver_reason"):
+            db.execute(f"ALTER TABLE task_runs DROP COLUMN {column}")
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        copies = list(pool.map(Store, [store.data_dir, store.data_dir]))
+    migrated = copies[0]
+    run = migrated.get_run(b_run)
+    assert run["receiver_state"] == "closed" and run["receiver_reason"] == "legacy_unqualified"
+    assert run["receiver_owner"] is None and run["receiver_opened_at"] is None
+    assert run["receiver_closed_at"] == run["receiver_closing_at"]
+    row = migrated.get_intent(peer["id"])
+    assert row["admission"] == "legacy" and row["to_run_id"] is None
+    assert row["terminal_reason"] == "legacy_unbound"
+    for field in ("state", "acked_at", "answered_at", "delivered_at", "delivered_via"):
+        assert row[field] == before[field]
+    assert migrated.get_intent(question["id"])["terminal_reason"] is None
+    answer = migrated.create_operator_intent(reply_to=question["id"], body="historical answer")
+    assert migrated.get_intent(question["id"])["state"] == "answered"
+    assert answer["admission"] == "unavailable" and answer["to_run_id"] == a_run
+    with pytest.raises(TransitionError):
+        migrated.update_receiver(b_run, b_tok, action="receiving", owner="new", reason="native_start")
+    reopened = Store(store.data_dir)
+    assert reopened.get_intent(peer["id"]) == row
+    assert reopened.get_run(b_run)["receiver_closed_at"] == run["receiver_closed_at"]
+
+
+def test_retained_requests_are_complete_ordered_exact_run_and_pure(store: Store) -> None:
+    a, ar, at, b, br, bt = _two_live_tasks(store)
+    rows = [store.create_intent(a, ar, at, kind="request", to_task_id=b,
+                                body=f"retained-{i}:" + "x" * 4400) for i in range(5)]
+    store.report_receipt(rows[1]["id"], br, bt, "prepared", "hook")
+    for row in rows[2:]:
+        store.ack_intent(row["id"], br, bt, source="cli")
+    store.create_intent(b, br, bt, kind="request", reply_to=rows[3]["id"], body="answer")
+    # A terminal historical row remains readable while this run is still live.
+    store.update_receiver(br, bt, action="closed", reason="native_end")
+    foreign = store.create_operator_intent(to_task_id=a, body="foreign")
+    with store.connection() as db:
+        db.execute("UPDATE task_intents SET to_run_id=NULL,admission='legacy' WHERE id=?", (rows[4]["id"],))
+        before = [tuple(row) for row in db.execute("SELECT * FROM task_intents ORDER BY rowid")]
+    events = {run: store.read_run_events(run) for run in (ar, br)}
+    log = store.runs_path.read_bytes()
+    ids = [rows[3]["id"], rows[1]["id"], rows[3]["id"], "missing",
+           foreign["id"], rows[4]["id"], rows[0]["id"], rows[2]["id"]]
+    retained = store.retained_requests_for_run(br, bt, ids)
+    assert [row["id"] for row in retained] == [rows[i]["id"] for i in (3, 1, 0, 2)]
+    assert all("x" * 4400 in row["body"] and row["body"] in row["framed"] for row in retained)
+    assert retained[0]["state"] == "answered" and retained[0]["answered_at"]
+    assert retained[1]["terminal_reason"] == "receiver_closed" and retained[1]["delivered_at"]
+    assert retained[-1]["acked_at"]
+    with store.connection() as db:
+        assert [tuple(row) for row in db.execute("SELECT * FROM task_intents ORDER BY rowid")] == before
+    assert store.runs_path.read_bytes() == log
+    assert {run: store.read_run_events(run) for run in (ar, br)} == events
+    assert store.retained_requests_for_run(ar, at, [row["id"] for row in rows]) == []
+    store.finish_run(br, bt, status="failed", error="fixture")
+    store.requeue_task(b, "ready")
+    replacement = _claim(store, b)
+    assert store.retained_requests_for_run(replacement["id"], replacement["claim_token"], ids) == []
+    with pytest.raises(TransitionError):
+        store.retained_requests_for_run(br, bt, [])
+    with pytest.raises(TransitionError):
+        store.retained_requests_for_run(ar, "wrong", [])
+
+
+@pytest.mark.parametrize("ids", [None, "id", [""], [1], ["x" * 129], ["id"] * 21])
+def test_retained_requests_bound_direct_callers(store: Store, ids) -> None:
+    with pytest.raises(ValueError):
+        store.retained_requests_for_run("unused", "unused", ids)
+
+
+def test_retained_reads_preserve_live_states_and_notice_kind(store: Store) -> None:
+    a, ar, at, b, br, bt = _two_live_tasks(store)
+    stored = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="stored")
+    delivered = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="prepared")
+    store.report_receipt(delivered["id"], br, bt, "prepared", "hook")
+    acknowledged = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="acknowledged")
+    store.ack_intent(acknowledged["id"], br, bt, source="cli")
+    child = store.propose_task(b, br, bt, title="child", brief="b", acceptance=["true"])
+    store.ready_task(child["id"])
+    cr = _claim(store, child["id"])
+    store.start_run(cr["id"], cr["claim_token"], base_commit="a", branch="b", worktree="/x")
+    store.finish_run(cr["id"], cr["claim_token"], status="review", report="notice body")
+    notice = next(row for row in store.requests_for_run(br, bt) if row["kind"] == "notice")
+    store.ack_intent(notice["id"], br, bt, source="cli")
+    result = store.retained_requests_for_run(br, bt, [stored["id"], delivered["id"], acknowledged["id"], notice["id"]])
+    assert [row["state"] for row in result] == ["stored", "prepared", "acknowledged", "acknowledged"]
+    assert result[-1]["kind"] == "notice" and "<agent-notice " in result[-1]["framed"]
+
+
+# -- honest receipts (SU3): separate facts, explicit acknowledgement only ------
+
+def _receipt(row: dict[str, Any], stage: str) -> dict[str, Any] | None:
+    return next((r for r in row["receipts"] if r["stage"] == stage), None)
+
+
+def test_prepared_report_leaves_explicit_acknowledgement_absent(store: Store) -> None:
+    a, ar, at, b, br, bt = _two_live_tasks(store)
+    intent = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="hi")
+    stored = _receipt(intent, "stored")
+    assert stored is not None and stored["actor"] == "bus" and stored["run_id"] == br
+    row = store.report_receipt(intent["id"], br, bt, "prepared", "hook")
+    assert row["state"] == "prepared"
+    prepared = _receipt(row, "prepared")
+    assert prepared["actor"] == "helper" and prepared["source"] == "hook" and prepared["run_id"] == br
+    assert prepared["count"] == 1
+    assert row["acked_at"] is None and _receipt(row, "acknowledged") is None
+    assert row["delivered_via"] == "hook" and row["delivered_at"] == prepared["at"]
+    assert _receipt(row, "queued") is None and _receipt(row, "included") is None
+
+
+def test_second_prepared_report_keeps_first_evidence_and_counts(store: Store) -> None:
+    a, ar, at, b, br, bt = _two_live_tasks(store)
+    intent = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="hi")
+    first_at = datetime.now(timezone.utc).replace(microsecond=0)
+    first = store.report_receipt(intent["id"], br, bt, "prepared", "hook", now=first_at)
+    second = store.report_receipt(intent["id"], br, bt, "prepared", "inbox_tool",
+                                  now=first_at + timedelta(seconds=30))
+    one, two = _receipt(first, "prepared"), _receipt(second, "prepared")
+    assert two["at"] == one["at"] and two["source"] == "hook" and two["count"] == 2
+    assert two["last_at"] > two["at"]
+    assert second["delivered_via"] == "hook" and second["delivered_at"] == one["at"]
+    assert second["delivery_attempts"] == 2 and second["state"] == "prepared"
+
+
+def test_four_prepared_reports_keep_first_evidence_and_remain_unanswered(store: Store) -> None:
+    a, ar, at, b, br, bt = _two_live_tasks(store)
+    intent = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="keep waiting")
+    moment = datetime.now(timezone.utc).replace(microsecond=0)
+    first = store.report_receipt(intent["id"], br, bt, "prepared", "hook", now=moment)
+    one = _receipt(first, "prepared")
+    for seconds in (30, 60, 90):
+        fourth = store.report_receipt(
+            intent["id"], br, bt, "prepared", "inbox_tool", now=moment + timedelta(seconds=seconds))
+    four = _receipt(fourth, "prepared")
+    assert four == {**one, "count": 4, "last_at": (moment + timedelta(seconds=90)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    assert fourth["delivery_attempts"] == 4
+    assert fourth["delivered_via"] == "hook" and fourth["delivered_at"] == one["at"]
+    later = moment + timedelta(seconds=3000)
+    assert store.requests_for_run(br, bt, ack_seconds=900, now=later) == []
+    assert not any(row["id"] == intent["id"] for row in store.sweep_intents(now=later, ack_seconds=900))
+    response = store.intent_for_waiter(intent["id"], ar, at)
+    assert response["replies"] == []
+    waiting = response["intent"]
+    assert waiting["state"] == "prepared"
+    assert waiting["terminal_reason"] is None and waiting["terminal_at"] is None
+    assert waiting["acked_at"] is None and waiting["answered_at"] is None
+    assert _receipt(waiting, "prepared") == four
+    assert _receipt(waiting, "undelivered") is None
+    assert _receipt(waiting, "acknowledged") is None and _receipt(waiting, "answered") is None
+    lines = [json.loads(line) for line in store.runs_path.read_text().splitlines()]
+    assert not any(line["outcome"] in ("intent:expired", "intent:undeliverable", "intent:terminal") for line in lines)
+
+
+def test_reply_from_stored_creates_explicit_ack_and_answer_without_prepared(store: Store) -> None:
+    a, ar, at, b, br, bt = _two_live_tasks(store)
+    original = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="hi")
+    reply = store.create_intent(b, br, bt, kind="request", reply_to=original["id"], body="answer")
+    assert reply["to_task_id"] == a
+    answered = store.get_intent(original["id"])
+    assert answered["state"] == "answered" and answered["acked_at"] == answered["answered_at"]
+    ack = _receipt(answered, "acknowledged")
+    assert ack["actor"] == "agent" and ack["source"] == "reply" and ack["run_id"] == br
+    assert _receipt(answered, "answered")["actor"] == "agent"
+    assert _receipt(answered, "prepared") is None and answered["delivered_via"] is None
+
+
+def test_operator_answer_is_the_operator_explicit_act(store: Store) -> None:
+    a, ar, at = _live_task(store, repo="ra")
+    question = store.create_intent(a, ar, at, kind="request", to_task_id="operator", body="may I?")
+    store.create_operator_intent(reply_to=question["id"], body="yes")
+    row = store.get_intent(question["id"])
+    assert _receipt(row, "acknowledged")["actor"] == "operator"
+    assert _receipt(row, "answered")["actor"] == "operator"
+
+
+def test_cli_ack_creates_explicit_receipt_and_fabricates_no_preparation(store: Store) -> None:
+    a, ar, at, b, br, bt = _two_live_tasks(store)
+    intent = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="hi")
+    row = store.ack_intent(intent["id"], br, bt, source="cli")
+    assert row["state"] == "acknowledged"
+    ack = _receipt(row, "acknowledged")
+    assert ack["actor"] == "agent" and ack["source"] == "cli"
+    assert row["delivered_via"] is None and row["delivered_at"] is None
+    assert _receipt(row, "prepared") is None
+    again = store.ack_intent(intent["id"], br, bt, source="cli")
+    assert again == row  # a repeated explicit ack adds no fact; the first stays
+    with pytest.raises(TransitionError):
+        store.report_receipt(intent["id"], br, bt, "prepared", "hook")
+    with pytest.raises(ValueError):
+        store.ack_intent(intent["id"], br, bt, source="hook")
+
+
+def test_receipt_refuses_unknown_stage_and_source(store: Store) -> None:
+    a, ar, at, b, br, bt = _two_live_tasks(store)
+    intent = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="hi")
+    with pytest.raises(ValueError):
+        store.report_receipt(intent["id"], br, bt, "included", "hook")
+    with pytest.raises(ValueError):
+        store.report_receipt(intent["id"], br, bt, "prepared", "socket")
+    assert not hasattr(store, "report_delivery")
+
+
+def test_prepared_row_leaves_pending_and_is_never_settled_undeliverable(store: Store) -> None:
+    a, ar, at, b, br, bt = _two_live_tasks(store)
+    intent = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="hi")
+    assert [row["id"] for row in store.requests_for_run(br, bt)] == [intent["id"]]
+    store.report_receipt(intent["id"], br, bt, "prepared", "hook")
+    assert store.requests_for_run(br, bt) == []
+    much_later = datetime.now(timezone.utc) + timedelta(seconds=3000)  # past ack_seconds, inside the lease
+    assert store.requests_for_run(br, bt, ack_seconds=900, now=much_later) == []
+    store.sweep_intents(now=much_later, ack_seconds=900)
+    row = store.get_intent(intent["id"])
+    assert row["state"] == "prepared" and row["terminal_reason"] is None
+    assert all(q["id"] != intent["id"] for q in store.heartbeat_run(br, bt, lease_seconds=600)["pending_requests"])
+
+
+def test_waiting_notice_only_for_rows_never_prepared(store: Store) -> None:
+    a, ar, at, b, br, bt = _two_live_tasks(store)
+    unread = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="unread")
+    read = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="read")
+    store.report_receipt(read["id"], br, bt, "prepared", "hook")
+    later = datetime.now(timezone.utc) + timedelta(seconds=901)
+    notices = {n["id"]: n["notice"] for n in store.sweep_intents(now=later, ack_seconds=900)}
+    assert notices.get(unread["id"]) == "waiting"
+    assert read["id"] not in notices
+
+
+def test_answered_original_and_unavailable_reply_are_two_facts(store: Store) -> None:
+    a, ar, at, b, br, bt = _two_live_tasks(store)
+    original = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="hi")
+    store.report_receipt(original["id"], br, bt, "prepared", "hook")
+    store.finish_run(ar, at, status="review", report="gone")
+    reply = store.create_intent(b, br, bt, kind="request", reply_to=original["id"], body="late answer")
+    assert reply["admission"] == "unavailable" and reply["state"] == "unavailable"
+    undelivered = _receipt(reply, "undelivered")
+    assert undelivered["actor"] == "bus" and undelivered["source"] == "admission"
+    assert undelivered["reason"] == reply["terminal_reason"] == "receiver_closed"
+    answered = store.get_intent(original["id"])
+    assert answered["state"] == "answered" and _receipt(answered, "answered") is not None
+    assert _receipt(answered, "undelivered") is None
+
+
+def test_receiver_close_writes_undelivered_receipt_without_erasing_prepared(store: Store) -> None:
+    a, ar, at, b, br, bt = _two_live_tasks(store)
+    intent = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="hi")
+    store.report_receipt(intent["id"], br, bt, "prepared", "hook")
+    store.finish_run(br, bt, status="review", report="done")
+    row = store.get_intent(intent["id"])
+    assert row["terminal_reason"] == "receiver_closed" and row["state"] == "prepared"
+    closed = _receipt(row, "undelivered")
+    assert closed["actor"] == "bus" and closed["source"] == "receiver" and closed["reason"] == "receiver_closed"
+    assert _receipt(row, "prepared") is not None
+
+
+def test_operator_notice_post_is_a_queued_receipt(store: Store) -> None:
+    a, ar, at = _live_task(store, repo="ra")
+    question = store.create_intent(a, ar, at, kind="request", to_task_id="operator", body="may I?")
+    assert store.mark_intent_notified(question["id"], "operator", chat_id="-200", message_id=7) is True
+    row = store.get_intent(question["id"])
+    queued = _receipt(row, "queued")
+    assert queued["actor"] == "operator_channel" and queued["source"] == "operator_channel"
+    assert row["notified_at"] == queued["at"]
+
+
+def test_legacy_migration_qualifies_old_evidence_and_never_backfills_explicit_acks(
+        store: Store, settings) -> None:
+    a, ar, at, b, br, bt = _two_live_tasks(store)
+    auto = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="auto")
+    pushed = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="pushed")
+    untouched = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="untouched")
+    with store.connection() as db:
+        db.execute("DROP TABLE intent_receipts")
+        db.execute("UPDATE task_intents SET state='acknowledged',acked_at='2026-10-01T00:00:00Z',"
+                   "delivered_via='inbox',delivered_at='2026-10-01T00:00:00Z' WHERE id=?", (auto["id"],))
+        db.execute("UPDATE task_intents SET state='delivered',delivered_via='socket',"
+                   "delivered_at='2026-10-02T00:00:00Z',delivery_attempts=2 WHERE id=?", (pushed["id"],))
+    reopened = Store(settings.BUS_DATA_DIR)
+    old = reopened.get_intent(auto["id"])
+    ack = _receipt(old, "acknowledged")
+    assert ack["actor"] == "legacy" and ack["source"] == "automatic" and ack["at"] == "2026-10-01T00:00:00Z"
+    assert _receipt(old, "prepared")["actor"] == "legacy"
+    assert all(r["actor"] != "agent" for r in old["receipts"])
+    moved = reopened.get_intent(pushed["id"])
+    assert moved["state"] == "prepared"
+    prepared = _receipt(moved, "prepared")
+    assert prepared["actor"] == "legacy" and prepared["source"] == "socket" and prepared["count"] == 2
+    plain = reopened.get_intent(untouched["id"])
+    assert [r["stage"] for r in plain["receipts"]] == ["stored"]
+    assert _receipt(plain, "stored")["actor"] == "legacy"
+    assert Store(settings.BUS_DATA_DIR).get_intent(auto["id"])["receipts"] == old["receipts"]
+
+
+def test_format_receipts_orders_stages_and_marks_legacy(store: Store) -> None:
+    from agent_os.store import format_receipts
+    receipts = [
+        {"stage": "acknowledged", "actor": "legacy", "source": "automatic", "at": "T2", "count": 1},
+        {"stage": "stored", "actor": "bus", "source": "store", "at": "T1", "count": 1},
+        {"stage": "prepared", "actor": "helper", "source": "hook", "at": "T1", "count": 3},
+    ]
+    text = format_receipts(receipts)
+    assert text.index("stored@T1/bus:store") < text.index("prepared@T1/helper:hook×3")
+    assert text.index("prepared@") < text.index("acknowledged@T2/legacy:automatic [legacy]")
+    assert "queued=absent" in text and "answered=absent" in text and "undelivered=absent" in text
+    assert "included=absent" in text
+    assert "[legacy]" not in text.split("acknowledged@")[0]
+
+
+def test_intent_event_carries_stage_and_honest_via(store: Store) -> None:
+    a, ar, at, b, br, bt = _two_live_tasks(store)
+    intent = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="hi")
+    store.ack_intent(intent["id"], br, bt, source="cli")
+    events = _intent_feed(store, br, intent["id"])
+    assert [e["stage"] for e in events] == ["stored", "acknowledged"]
+    assert events[-1]["via"] is None and events[-1]["state"] == "acknowledged"
+    store2 = store
+    other = store2.create_intent(a, ar, at, kind="request", to_task_id=b, body="again")
+    store2.report_receipt(other["id"], br, bt, "prepared", "wait_tool")
+    prepared = _intent_feed(store2, br, other["id"])[-1]
+    assert prepared["stage"] == "prepared" and prepared["via"] == "wait_tool" and prepared["state"] == "prepared"
+
+
+def test_owner_queue_queued_receipt_leaves_row_stored_until_prepared_and_dispositions_on_close(store: Store) -> None:
+    a, ar, at, b, br, bt = _two_live_tasks(store)
+    first = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="queued then prepared")
+    second = store.create_intent(a, ar, at, kind="request", to_task_id=b, body="queued then closed before context")
+    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    q1 = store.report_receipt(first["id"], br, bt, "queued", "owner_queue", now=t0)
+    assert q1["state"] == "stored" and q1["delivered_at"] is None and q1["delivered_via"] is None
+    qr = _receipt(q1, "queued")
+    assert qr["actor"] == "helper" and qr["source"] == "owner_queue" and qr["count"] == 1
+    assert _receipt(q1, "prepared") is None
+    assert [r["id"] for r in store.requests_for_run(br, bt)] == [first["id"], second["id"]]
+
+    q2 = store.report_receipt(first["id"], br, bt, "queued", "owner_queue", now=t0 + timedelta(seconds=5))
+    assert _receipt(q2, "queued")["at"] == qr["at"] and _receipt(q2, "queued")["count"] == 2
+    assert q2["state"] == "stored"
+
+    p1 = store.report_receipt(first["id"], br, bt, "prepared", "owner_queue", now=t0 + timedelta(seconds=10))
+    assert p1["state"] == "prepared" and p1["delivered_via"] == "owner_queue"
+    pr = _receipt(p1, "prepared")
+    assert pr["actor"] == "helper" and pr["source"] == "owner_queue" and pr["count"] == 1
+    assert [r["id"] for r in store.requests_for_run(br, bt)] == [second["id"]]
+
+    store.report_receipt(second["id"], br, bt, "queued", "owner_queue", now=t0 + timedelta(seconds=12))
+    store.finish_run(br, bt, status="review", report="done")
+    closed_second = store.get_intent(second["id"])
+    assert closed_second["state"] == "stored" and closed_second["terminal_reason"] == "receiver_closed"
+    assert _receipt(closed_second, "queued")["source"] == "owner_queue"
+    assert _receipt(closed_second, "prepared") is None
+    assert _receipt(closed_second, "undelivered")["reason"] == "receiver_closed"
+

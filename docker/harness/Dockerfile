@@ -8,13 +8,17 @@ ARG TARGETARCH
 ARG CLAUDE_VERSION=2.1.296
 ARG CODEX_VERSION=0.162.1
 ARG PI_VERSION=1.1.0
-ARG OMP_VERSION=18.8.3
-ARG OMP_SHA256_ARM64=170852b7815ef74e1212f87e69fa7f2730f31716479177df436d3eaa832d8ca5
-ARG OMP_SHA256_AMD64=8cb6d6a0035a3c5d9c40a58852ca361569eafc2cecbbeef4521e0fefc8ccbc37
+ARG OMP_VERSION=18.12.1
+ARG OMP_BUILD=20261017-231446-291e055
+ARG OMP_SHA256_ARM64=16545d7e747b31dbc66f2bcd63f24f12dc1dc7e944767b09b0df6591bf826a93
+ARG OMP_SHA256_AMD64=16181401e616d7d895bae31fa97476f1513d4080807d60d3a1a04006191a1bb3
 ARG UV_VERSION=0.13.0
 ARG PYTHON_SERIES=3.12
 ARG PLAYWRIGHT_VERSION=1.63.0
 ARG POETRY_VERSION=2.1.3
+ARG DEVIN_VERSION=3000.11.92
+ARG DEVIN_SHA256_ARM64=881e83b0df06dd57a307004e299407c2c3745f288546e0a339a67fbebe7cb6c0
+ARG DEVIN_SHA256_AMD64=2d829139682e038cf122510f1170eee3d7060bcc7ebf92445cbc5d28c9fbcfa0
 
 ENV UV_PYTHON_INSTALL_DIR=/usr/local/share/uv-python \
     UV_PYTHON_PREFERENCE=only-managed \
@@ -34,17 +38,37 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_VERSION}" \
     && npm install -g --ignore-scripts "@openai/codex@${CODEX_VERSION}" "@earendil-works/pi-coding-agent@${PI_VERSION}" \
     && npm cache clean --force
 
-# omp is a single static binary, not an npm package. TARGETARCH comes from BuildKit;
-# the legacy builder leaves it empty, so fall back to dpkg.
+# omp is a release executable, not an npm package. The immutable build locator and
+# per-architecture hashes are pinned alongside the version. TARGETARCH comes from
+# BuildKit; the legacy builder leaves it empty, so fall back to dpkg.
 RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
     && case "${arch}" in \
       arm64) asset=omp-linux-arm64; sum="${OMP_SHA256_ARM64}" ;; \
       amd64) asset=omp-linux-x64; sum="${OMP_SHA256_AMD64}" ;; \
       *) echo "unsupported architecture '${arch}'" >&2; exit 1 ;; \
     esac \
-    && curl -fsSL -o /usr/local/bin/omp "https://github.com/can1357/oh-my-pi/releases/download/v${OMP_VERSION}/${asset}" \
+    && curl -fsSL -o /usr/local/bin/omp "https://build.stencil.so/d/omp/${OMP_BUILD}/${asset}" \
     && echo "${sum}  /usr/local/bin/omp" | sha256sum -c - \
-    && chmod 0555 /usr/local/bin/omp
+    && chmod 0555 /usr/local/bin/omp \
+    && test "$(/usr/local/bin/omp --version)" = "omp/${OMP_VERSION}"
+
+# Devin for Terminal is a static release tarball; its version and per-architecture hashes come
+# from https://static.devin.ai/cli/<version>/manifest.json. It lives under /usr because the
+# sandbox policy's read-only baseline does not include /opt.
+RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
+    && case "${arch}" in \
+      arm64) target=aarch64-unknown-linux; sum="${DEVIN_SHA256_ARM64}" ;; \
+      amd64) target=x86_64-unknown-linux; sum="${DEVIN_SHA256_AMD64}" ;; \
+      *) echo "unsupported architecture '${arch}'" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL -o /tmp/devin.tgz "https://static.devin.ai/cli/${DEVIN_VERSION}/devin-${DEVIN_VERSION}-${target}.tar.gz" \
+    && echo "${sum}  /tmp/devin.tgz" | sha256sum -c - \
+    && mkdir -p /usr/local/lib/devin \
+    && tar xzf /tmp/devin.tgz --no-same-owner -C /usr/local/lib/devin \
+    && rm /tmp/devin.tgz \
+    && chmod -R a+rX /usr/local/lib/devin \
+    && ln -s /usr/local/lib/devin/bin/devin /usr/local/bin/devin \
+    && test "$(devin --version | cut -d' ' -f2)" = "${DEVIN_VERSION}"
 
 # uv, a uv-managed Python, Playwright's Chromium and Poetry, installed system-wide.
 # Poetry is a uv tool on the managed Python (freelance_bot's pyproject uses Poetry's caret
@@ -77,6 +101,7 @@ RUN mkdir -p /etc/aos-harness \
       echo "codex=$(codex --version 2>&1 | head -n1)"; \
       echo "pi=$(pi --version 2>&1 | head -n1)"; \
       echo "omp=$(omp --version 2>&1 | head -n1)"; \
+      echo "devin=$(devin --version 2>&1 | head -n1)"; \
       echo "uv=$(uv --version)"; \
       echo "python=$(uv run --no-project --python "${PYTHON_SERIES}" python --version)"; \
       echo "playwright=$(uv tool run --from "playwright==${PLAYWRIGHT_VERSION}" playwright --version)"; \

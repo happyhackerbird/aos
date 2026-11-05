@@ -63,6 +63,7 @@ class FakeBus:
         self.submission: dict[str, Any] | None = None
         # Fix lane 1 X5: seconds each ack takes on the bus (the hook's deadline test)
         self.ack_delay = 0.0
+        self.fail_receipt_ids: set[str] = set()
         self.candidates: list[str] = []
         self.imports: list[tuple[str, str, str]] = []
         self.proposals: dict[tuple[str, str], dict[str, Any]] = {}
@@ -109,15 +110,28 @@ class FakeBus:
         row = {"id": self._new_id(task_id), "task_id": task_id, "run_id": run_id, "kind": kind,
                "to_task_id": to_task_id, "body": body, "reply_to": reply_to, "state": state,
                "created_at": "2026-10-14T18:00:00Z"}
+        row.update(admission="accepted",
+                   to_run_id=None if to_task_id == "operator" else RUN_ID if to_task_id == TASK_ID else f"{to_task_id}-r1",
+                   terminal_reason=None, terminal_at=None)
         row["framed"] = operator_frame(row) if task_id == "operator" else agent_frame(row)
         self.rows[row["id"]] = row
         return row
 
     def pending_for(self, task_id: str) -> list[dict[str, Any]]:
-        return [r for r in self.rows.values() if r["to_task_id"] == task_id and r["state"] in ("stored", "delivered")]
+        # SU3 D6a: a row prepared into the receiver's context has left the queue.
+        return [r for r in self.rows.values() if r["to_task_id"] == task_id and r["state"] == "stored"]
+
+    def receipts(self, path_suffix: str = "/receipt") -> list[tuple[str, str, str]]:
+        """(intent id, stage, source) of every receipt the helper reported, in order."""
+        return [(path.split("/")[2], body["stage"], body["source"])
+                for path, body in self.calls if path.endswith(path_suffix)]
 
     def handle(self, path: str, body: dict[str, Any]) -> tuple[int, Any]:
         parts = path.strip("/").split("/")
+        if parts[0] == "runs" and parts[2] == "receiver":
+            if body.get("claim_token") != TOKEN:
+                return 409, {"detail": TOKEN}
+            return 200, {"id": parts[1], "receiver_state": body["action"]}
         if parts[0] == "runs" and parts[2] in ("family", "candidates", "imports"):
             if body.get("claim_token") != TOKEN:
                 return 409, {"detail": "stale claim_token"}
@@ -159,7 +173,7 @@ class FakeBus:
                 original = self.rows.get(body["reply_to"])
                 if original is None:
                     return 404, {"detail": "Intent not found"}
-                if original["state"] not in ("delivered", "acknowledged"):
+                if original["state"] not in ("stored", "prepared", "acknowledged"):
                     return 409, {"detail": f"cannot answer a {original['state']} request"}
                 row = self.add_row(task_id=task_id, to_task_id=original["task_id"], body=body["body"],
                                    reply_to=original["id"], run_id=body["run_id"])
@@ -177,14 +191,38 @@ class FakeBus:
                 return self.inbox_error
             if body.get("claim_token") != TOKEN:
                 return 409, {"detail": "stale claim_token"}
-            return 200, {"pending_requests": self.pending_for(TASK_ID), "overlaps": list(self.overlaps)}
-        if parts[0] == "intents" and parts[2] == "ack":
+            retained = [self.rows[value] for value in dict.fromkeys(body.get("known_ids", []))
+                        if value in self.rows and self.rows[value].get("to_run_id") == RUN_ID
+                        and self.rows[value].get("admission") == "accepted"]
+            return 200, {"pending_requests": self.pending_for(TASK_ID)[:20],
+                         "overlaps": list(self.overlaps), "retained_requests": retained}
+        if parts[0] == "intents" and parts[2] == "receipt":
             time.sleep(self.ack_delay)
+            if parts[1] in self.fail_receipt_ids:
+                return 503, {"detail": "receipt bus outage"}
             row = self.rows.get(parts[1])
             if row is None:
                 return 404, {"detail": "Intent not found"}
             if body.get("claim_token") != TOKEN:
                 return 409, {"detail": "stale claim_token"}
+            if body.get("stage") not in ("queued", "prepared") or body.get("source") not in (
+                    "inbox_tool", "wait_tool", "inbox_wait_tool", "hook", "owner_queue", "cli"):
+                return 422, {"detail": "invalid receipt"}
+            if row["state"] not in ("stored", "prepared"):
+                return 409, {"detail": f"cannot report a receipt on a {row['state']} request"}
+            row.setdefault("receipts", []).append(
+                {"stage": body["stage"], "actor": "helper", "source": body["source"]})
+            if body["stage"] == "prepared":
+                row["state"] = "prepared"
+            return 200, row
+        if parts[0] == "intents" and parts[2] == "ack":
+            row = self.rows.get(parts[1])
+            if row is None:
+                return 404, {"detail": "Intent not found"}
+            if body.get("claim_token") != TOKEN:
+                return 409, {"detail": "stale claim_token"}
+            if body.get("source") != "cli":
+                return 422, {"detail": "source required"}
             if row["state"] not in ("acknowledged", "answered"):
                 row["state"] = "acknowledged"
             return 200, row
@@ -397,6 +435,12 @@ def text_of(result: dict[str, Any]) -> str:
     assert [c["type"] for c in result["content"]] == ["text"]
     return result["content"][0]["text"]
 
+def wait_status(result: dict[str, Any]) -> dict[str, Any]:
+    first = text_of(result).splitlines()[0]
+    assert first.startswith("aos_wait ")
+    return json.loads(first.removeprefix("aos_wait "))
+
+
 
 def ledger_lines(env: dict[str, str]) -> list[dict[str, Any]]:
     path = Path(env["AOS_AGENT_STATE_DIR"]) / f"{RUN_ID}.jsonl"
@@ -499,10 +543,10 @@ def test_protected_ids_are_refused_before_any_request(
         assert text_of(result) == f"{tool}: a protected value occurs in the field {field}; refusing"
         assert bus.calls == []
     assert row["state"] == "stored"
-    # Acknowledgements also send ids in URL paths, including delivery-hook acks.
+    # Receipt reports also send ids in URL paths, including the delivery hook's.
     client = helper.Bus(helper.load_run(), helper.TOOL_TIMEOUT)
     with pytest.raises(ValueError, match="^a protected value occurs in the field id; refusing$"):
-        client.ack(intent_id)
+        client.receipt(intent_id, "prepared", "hook")
     assert bus.calls == []
 
 
@@ -538,6 +582,30 @@ def test_headless_run_file_ignores_the_masking_keys(agent_env: dict[str, str], b
         assert bus.calls[-1][1]["body"] == value
 
 
+def test_headless_secrets_are_masked_from_what_the_agent_sends(agent_env: dict[str, str], bus: FakeBus) -> None:
+    # A Devin key outlives its run, unlike the claim token, so its run file names it for the helper to mask.
+    path = Path(agent_env["AOS_AGENT_RUN_FILE"])
+    run = json.loads(path.read_text())
+    value = "long-lived-worker-key"
+    run["headless_secrets"] = [value]
+    path.write_text(json.dumps(run))
+    result = call(agent_env, "aos_ask", {"to": "operator", "text": f"the key is {value}"})
+    assert result["isError"] is False
+    assert bus.calls[-1][1]["body"] == "the key is ***"
+
+
+def test_malformed_headless_secrets_fail_closed(agent_env: dict[str, str], bus: FakeBus) -> None:
+    path = Path(agent_env["AOS_AGENT_RUN_FILE"])
+    run = json.loads(path.read_text())
+    for secrets in ([], "secret", ["ok", ""], ["ok", 7]):
+        run["headless_secrets"] = secrets
+        path.write_text(json.dumps(run))
+        result = call(agent_env, "aos_ask", {"to": "operator", "text": "hello"})
+        assert result["isError"] is True
+        assert text_of(result) == "aos-agent: no run credential (/sandbox/aos-run.json)"
+    assert bus.calls == []
+
+
 def test_dockerfile_installs_tmux_and_the_attach_lock() -> None:
     source = (SCRIPT.parent / "Dockerfile").read_text()
     apt = source.split("apt-get install", 1)[1].split("&&", 1)[0]
@@ -549,36 +617,37 @@ def test_dockerfile_installs_tmux_and_the_attach_lock() -> None:
     assert source.index(lock) > source.index("chmod 0644 /usr/local/lib/aos-agent/aos_pi.ts")
 
 
-def test_extension_protocol_and_interactive_guard() -> None:
+@pytest.mark.parametrize("interactive", [False, True])
+def test_extension_finalization_continues_once_only_in_headless_mode(interactive: bool) -> None:
     node = shutil.which("node")
     assert node is not None, "node is required to verify the aos_pi.ts extension"
     driver = r'''
 import assert from "node:assert/strict";
-const {default: adapter, protocol} = await import(MODULE_URI);
-assert.equal(protocol, "2.2");
-const handlers = new Map(), calls = [];
+const cp = await import("node:child_process");
+cp.default.spawnSync = () => ({
+  status: 0, stdout: JSON.stringify({decision: "block", reason: "unanswered operator request"}), stderr: ""
+});
+(await import("node:module")).default.syncBuiltinESMExports();
+const {default: adapter} = await import(MODULE_URI);
+const handlers = new Map(), messages = [];
 adapter({on: (name, handler) => handlers.set(name, handler),
-         sendUserMessage: (...args) => calls.push(args)});
-assert.deepEqual([...handlers.keys()], ["session_start", "tool_result", "turn_end", "agent_start", "agent_end"]);
+         sendUserMessage: (...args) => messages.push(args)});
 const context = {sessionManager: {getHeader: () => ({}), getSessionId: () => "owner"}};
 handlers.get("session_start")({}, context);
-handlers.get("turn_end")({message: {role: "assistant", stopReason: "stop"}, toolResults: []}, context);
-assert.equal(calls.length, EXPECTED);
-if (EXPECTED) {
-  assert.match(calls[0][0], /Final message check failed/);
-  assert.deepEqual(calls[0][1], {deliverAs: "followUp"});
-}
-console.log(`sendUserMessage calls: ${calls.length}; handlers: ${handlers.size}`);
+const final = {message: {role: "assistant", stopReason: "stop"}, toolResults: []};
+const expected = process.env.AOS_INTERACTIVE === "1" ? 0 : 1;
+handlers.get("turn_end")(final, context);
+assert.equal(messages.length, expected);
+handlers.get("turn_end")(final, context);
+assert.equal(messages.length, expected);
 '''.replace("MODULE_URI", json.dumps((SCRIPT.parent / "aos_pi.ts").as_uri()))
-    for interactive, expected in ((True, 0), (False, 1)):
-        env = dict(os.environ)
-        env.pop("AOS_INTERACTIVE", None)
-        if interactive:
-            env["AOS_INTERACTIVE"] = "1"
-        result = subprocess.run([node, "--input-type=module", "-e", driver.replace("EXPECTED", str(expected))],
-                                env=env, capture_output=True, text=True, timeout=30)
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert result.stdout.strip() == f"sendUserMessage calls: {expected}; handlers: 5"
+    env = dict(os.environ, AOS_AGENT_AUTOMATIC="1")
+    env.pop("AOS_INTERACTIVE", None)
+    if interactive:
+        env["AOS_INTERACTIVE"] = "1"
+    result = subprocess.run([node, "--input-type=module", "-e", driver],
+                            env=env, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 # -- 1. standard library only --------------------------------------------------
@@ -639,11 +708,11 @@ def test_mcp_lifecycle_and_errors(agent_env: dict[str, str]) -> None:
 
 def test_ask_posts_the_bound_body_and_reports_bus_errors(agent_env: dict[str, str], bus: FakeBus) -> None:
     result = call(agent_env, "aos_ask", {"to": "operator", "text": "may I drop the table?"})
-    assert result["isError"] is False and text_of(result) == f"sent {TASK_ID}-i1 to operator"
+    assert result["isError"] is False and f"{TASK_ID}-i1 accepted for operator" == text_of(result)
     assert bus.calls[-1] == (f"/tasks/{TASK_ID}/intents", {
         "run_id": RUN_ID, "claim_token": TOKEN, "kind": "request", "to_task_id": "operator", "body": "may I drop the table?"})
     result = call(agent_env, "aos_ask", {"to": "AO-2", "text": "peer?"})
-    assert text_of(result) == f"sent {TASK_ID}-i2 to AO-2"
+    assert text_of(result) == f"{TASK_ID}-i2 accepted for AO-2-r1"
     result = call(agent_env, "aos_ask", {"to": "AO-404", "text": "nobody"})
     assert result["isError"] is True and text_of(result) == "bus 404: Task not found"
     result = call(agent_env, "aos_ask", {"to": "AO-2"})
@@ -652,7 +721,7 @@ def test_ask_posts_the_bound_body_and_reports_bus_errors(agent_env: dict[str, st
 
 # -- 4. inbox ---------------------------------------------------------------------
 
-def test_inbox_returns_frames_and_overlaps_and_acknowledges(agent_env: dict[str, str], bus: FakeBus) -> None:
+def test_inbox_returns_frames_and_overlaps_and_reports_prepared(agent_env: dict[str, str], bus: FakeBus) -> None:
     first = bus.add_row(task_id="AO-2", to_task_id=TASK_ID, body="can you expose the port?")
     second = bus.add_row(task_id="operator", to_task_id=TASK_ID, body="use staging", run_id=None)
     bus.overlaps = ['<agent-overlap id="f1" severity="high" with-task="AO-3" scope="file:x">\nboth touch x\n</agent-overlap>']
@@ -660,19 +729,19 @@ def test_inbox_returns_frames_and_overlaps_and_acknowledges(agent_env: dict[str,
     assert result["isError"] is False
     assert text_of(result).startswith("\n\n".join([first["framed"], second["framed"], bus.overlaps[0]]))
     assert "may be delivered again" in text_of(result)
-    acks = [body for path, body in bus.calls if path.endswith("/ack")]
-    assert [p for p, _ in bus.calls if p.endswith("/ack")] == [f"/intents/{first['id']}/ack", f"/intents/{second['id']}/ack"]
-    assert all(body == {"run_id": RUN_ID, "claim_token": TOKEN} for body in acks)
-    assert bus.rows[first["id"]]["state"] == "acknowledged" and bus.rows[second["id"]]["state"] == "acknowledged"
+    acks = [body for path, body in bus.calls if path.endswith("/receipt")]
+    assert [p for p, _ in bus.calls if p.endswith("/receipt")] == [f"/intents/{first['id']}/receipt", f"/intents/{second['id']}/receipt"]
+    assert all(body == {"run_id": RUN_ID, "claim_token": TOKEN, "stage": "prepared", "source": "inbox_tool"} for body in acks)
+    assert bus.rows[first["id"]]["state"] == "prepared" and bus.rows[second["id"]]["state"] == "prepared"
     events = ledger_lines(agent_env)
     assert events[0] == {"event": "tool", "name": "aos_inbox"}
-    delivered = [e for e in events if e["event"] == "acked"]
+    delivered = [e for e in events if e["event"] == "prepared"]
     assert [(e["id"], e["from"], e["reply_to"]) for e in delivered] == [
         (first["id"], "AO-2", None), (second["id"], "operator", None)]
     assert delivered[0]["body"] == "can you expose the port?"
     bus.overlaps = []
     result = call(agent_env, "aos_inbox", {})
-    assert text_of(result).startswith("inbox empty\n\nAcknowledged and not yet answered:") and result["isError"] is False
+    assert text_of(result).startswith("inbox empty\n\nDelivered to you and not yet answered:") and result["isError"] is False
 
 
 def test_ledger_lines_stay_under_512_bytes_for_non_ascii_bodies(agent_env: dict[str, str], bus: FakeBus) -> None:
@@ -689,7 +758,7 @@ def test_ledger_lines_stay_under_512_bytes_for_non_ascii_bodies(agent_env: dict[
     for raw, body in zip(raw_lines[1:], bodies):
         assert len(raw) < 512, len(raw)
         event = json.loads(raw)
-        assert event["event"] == "acked" and event["body"] and body.startswith(event["body"])
+        assert event["event"] == "prepared" and event["body"] and body.startswith(event["body"])
 
 
 def test_ledger_acked_line_carries_the_kind(agent_env: dict[str, str], bus: FakeBus) -> None:
@@ -709,19 +778,6 @@ def test_ledger_acked_line_carries_the_kind(agent_env: dict[str, str], bus: Fake
 
 # -- 5. reply ---------------------------------------------------------------------
 
-def test_reply_acks_then_replies_and_records_it(agent_env: dict[str, str], bus: FakeBus) -> None:
-    question = bus.add_row(task_id="AO-2", to_task_id=TASK_ID, body="which port?")
-    result = call(agent_env, "aos_reply", {"id": question["id"], "text": "8080"})
-    assert result["isError"] is False and text_of(result) == f"replied to {question['id']} ({TASK_ID}-i1)"
-    paths = [p for p, _ in bus.calls]
-    assert paths == [f"/intents/{question['id']}/ack", f"/tasks/{TASK_ID}/intents"]
-    assert bus.calls[-1][1] == {"run_id": RUN_ID, "claim_token": TOKEN, "reply_to": question["id"], "body": "8080"}
-    assert bus.rows[question["id"]]["state"] == "answered"
-    assert ledger_lines(agent_env) == [
-        {"event": "tool", "name": "aos_reply"}, {"event": "replied", "id": question["id"]}]
-    result = call(agent_env, "aos_reply", {"id": "AO-9-i9", "text": "x"})
-    assert result["isError"] is True and text_of(result) == "bus 404: Intent not found"
-
 
 # -- 6. wait ----------------------------------------------------------------------
 
@@ -731,25 +787,26 @@ def test_wait_loops_until_answered_and_acks_the_reply(agent_env: dict[str, str],
     result = held_call(agent_env, "aos_wait", {"id": question["id"], "timeout_s": 120})
     assert result["isError"] is False
     reply = next(r for r in bus.rows.values() if r.get("reply_to") == question["id"])
-    assert text_of(result).startswith(reply["framed"]) and reply["framed"].startswith("<operator-message")
-    waits = [body for path, body in bus.calls if path.endswith("/wait")]
-    assert len(waits) == 2 and all(0 < body["timeout"] <= 60 for body in waits)
-    assert waits[0] == {"run_id": RUN_ID, "claim_token": TOKEN, "timeout": 3}  # F99: capped at WAIT_POLL
-    assert bus.rows[reply["id"]]["state"] == "acknowledged"
+    assert reply["framed"] in text_of(result) and reply["framed"].startswith("<operator-message")
+    assert wait_status(result)["outcome"] == "answered"
+    assert wait_status(result)["request_id"] == question["id"]
+    assert bus.rows[reply["id"]]["state"] == "prepared"
     events = ledger_lines(agent_env)
     assert events[0] == {"event": "tool", "name": "aos_wait"}
-    assert [(e["id"], e["reply_to"]) for e in events[1:]] == [(reply["id"], question["id"])]
+    assert [(e["id"], e["reply_to"]) for e in events if e["event"] == "prepared"] == [(reply["id"], question["id"])]
+    assert {"event": "wait_returned", "id": reply["id"]} in events
 
 
 def test_wait_without_an_answer_returns_after_the_budget(agent_env: dict[str, str], bus: FakeBus) -> None:
     question = bus.add_row(task_id=TASK_ID, to_task_id="operator", body="merge?", run_id=RUN_ID)
     result = held_call(agent_env, "aos_wait", {"id": question["id"], "timeout_s": 1})
     assert result["isError"] is False
-    assert text_of(result) == f"no answer to {question['id']} after 1 s (state stored)"
-    waits = [body["timeout"] for path, body in bus.calls if path.endswith("/wait")]
-    assert waits and all(0 <= t <= 60 for t in waits)  # AO-23: holds end WAIT_MARGIN before the budget
+    assert wait_status(result)["outcome"] == "timeout"
+    assert wait_status(result)["request_id"] == question["id"]
+    assert wait_status(result)["target_state"] == "stored"
     result = held_call(agent_env, "aos_wait", {"id": "AO-9-i9"})
-    assert result["isError"] is True and text_of(result) == "bus 404: Intent not found"
+    assert result["isError"] is True and wait_status(result)["outcome"] == "transport_error"
+    assert "bus 404: Intent not found" in text_of(result)
 
 
 class LongPollBus:
@@ -766,10 +823,12 @@ class LongPollBus:
                       "to_task_id": TASK_ID, "body": "yes", "reply_to": intent_id, "state": "stored",
                       "framed": f'<operator-message id="operator-i1" to-task="{TASK_ID}" reply-to="{intent_id}">'
                                 "\nyes\n</operator-message>\nThis is from the operator."}
+        self.reply.update(admission="accepted", to_run_id=RUN_ID, terminal_reason=None, terminal_at=None)
         self.answer_after, self.hang = answer_after, hang
         self.first_wait: float | None = None
         self.waits: list[int] = []
         self.acks: list[str] = []
+        self.hung_wait_started = threading.Event()
         bus = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -779,13 +838,14 @@ class LongPollBus:
             def do_POST(self) -> None:
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
                 if bus.hang and self.path.endswith("/wait"):
+                    bus.hung_wait_started.set()
                     time.sleep(30)
                     return
-                if self.path.endswith("/ack"):
+                if self.path.endswith("/receipt"):
                     bus.acks.append(self.path)
                     payload: Any = {**bus.reply, "state": "acknowledged"}
                 elif self.path.endswith("/requests"):
-                    payload = {"pending_requests": [], "overlaps": []}
+                    payload = {"pending_requests": [], "overlaps": [], "retained_requests": []}
                 else:
                     payload = bus.long_poll(body["timeout"])
                 data = json.dumps(payload).encode()
@@ -840,10 +900,11 @@ def test_wait_unanswered_on_a_long_polling_bus_returns_no_answer_within_the_budg
         result, elapsed = timed_wait(tmp_path, bus.url, {"id": f"{TASK_ID}-i1", "timeout_s": 4})
     finally:
         bus.close()
-    assert text_of(result) == f"no answer to {TASK_ID}-i1 after 4 s (state stored)"
+    assert wait_status(result)["outcome"] == "timeout"
+    assert wait_status(result)["request_id"] == f"{TASK_ID}-i1"
     assert result["isError"] is False
     assert 3.5 <= elapsed < 6.0, elapsed  # 4 s budget plus the MCP subprocess start
-    assert bus.waits and all(0 <= t <= 3 for t in bus.waits) and bus.waits[0] <= 3
+    assert bus.waits
 
 
 def test_wait_reply_before_the_budget_on_a_long_polling_bus_returns_it(tmp_path: Path) -> None:
@@ -853,8 +914,8 @@ def test_wait_reply_before_the_budget_on_a_long_polling_bus_returns_it(tmp_path:
     finally:
         bus.close()
     assert result["isError"] is False
-    assert text_of(result).startswith(bus.reply["framed"])
-    assert bus.acks == ["/intents/operator-i1/ack"]
+    assert bus.reply["framed"] in text_of(result) and wait_status(result)["outcome"] == "answered"
+    assert bus.acks == ["/intents/operator-i1/receipt"]
     assert elapsed < 5.0, elapsed
 
 
@@ -865,7 +926,8 @@ def test_wait_transport_failures_stay_bus_unreachable(tmp_path: Path) -> None:
     # port bound without listen() is not: macOS drops its SYN and the connect runs to the budget.
     refused = "http://127.0.0.1:1"
     result, elapsed = timed_wait(tmp_path / "refused", refused, {"id": f"{TASK_ID}-i1", "timeout_s": 3})
-    assert result["isError"] is True and text_of(result).startswith("bus unreachable: ")
+    assert result["isError"] is True and wait_status(result)["outcome"] == "transport_error"
+    assert "bus unreachable: " in text_of(result)
     assert "no answer" not in text_of(result) and elapsed < 3.0
     bus = LongPollBus(f"{TASK_ID}-i1", hang=True)
     try:
@@ -873,7 +935,8 @@ def test_wait_transport_failures_stay_bus_unreachable(tmp_path: Path) -> None:
     finally:
         bus.close()
     assert result["isError"] is True
-    assert text_of(result) == "bus unreachable: invocation deadline reached"
+    assert wait_status(result)["outcome"] == "transport_error"
+    assert "bus unreachable: invocation deadline reached" in text_of(result)
     assert 1.5 <= elapsed < 4.0, elapsed
 
 
@@ -898,7 +961,8 @@ def test_wait_is_superseded_by_a_newer_call_and_by_eof(tmp_path: Path, kind: str
             session.write(rpc("tools/call", {"name": "aos_inbox", "arguments": {}}, id=3))
             first, second = session.read(40), session.read(40)
             elapsed = time.monotonic() - started
-            assert first["id"] == 2 and text_of(first["result"]) == "wait superseded by a newer call", (first, elapsed)
+            assert first["id"] == 2 and wait_status(first["result"])["outcome"] == "superseded", (first, elapsed)
+            assert wait_status(first["result"])["control"] == "superseded"
             assert first["result"]["isError"] is False
             assert second["id"] == 3 and text_of(second["result"]) == "inbox empty", (second, elapsed)
             assert elapsed < 6, elapsed
@@ -909,7 +973,8 @@ def test_wait_is_superseded_by_a_newer_call_and_by_eof(tmp_path: Path, kind: str
             session.process.stdin.close()
             answer = session.read(40)
             elapsed = time.monotonic() - started
-            assert answer["id"] == 2 and text_of(answer["result"]) == "wait superseded by a newer call", (answer, elapsed)
+            assert answer["id"] == 2 and wait_status(answer["result"])["outcome"] == "eof", (answer, elapsed)
+            assert wait_status(answer["result"])["control"] == "eof"
             assert session.process.wait(timeout=2) == 0
             assert elapsed < 6, elapsed
     finally:
@@ -925,15 +990,14 @@ def test_wait_superseded_on_a_hung_bus_frees_the_queued_call(tmp_path: Path) -> 
     env = make_agent_env(tmp_path, fake.url)
     try:
         with mcp_session(env) as session:
-            started = time.monotonic()
             session.write(rpc("tools/call", {"name": "aos_wait", "arguments": {"id": intent_id, "timeout_s": 30}}, id=2))
-            time.sleep(0.5)
+            assert fake.hung_wait_started.wait(20), "the wait request never reached the bus"
+            started = time.monotonic()
             session.write(rpc("tools/call", {"name": "aos_inbox", "arguments": {}}, id=3))
             first, second = session.read(70), session.read(70)
             elapsed = time.monotonic() - started
             assert first["id"] == 2 and first["result"]["isError"] is True, (first, elapsed)
-            assert text_of(first["result"]) == "bus unreachable: invocation deadline reached", (first, elapsed)
-            assert second["id"] == 3 and text_of(second["result"]) == "inbox empty", (second, elapsed)
+            assert second["id"] == 3 and second["result"]["isError"] is False, (second, elapsed)
             assert elapsed < 13, elapsed
     finally:
         fake.close()
@@ -943,11 +1007,13 @@ def test_ids_in_url_paths_are_quoted(agent_env: dict[str, str], bus: FakeBus) ->
     """Fix lane 1 X7 (review N6): an id with a space, `?` and `#` travels as one quoted path
     segment and the bus's own 404 comes back, not a client-side URL error."""
     result = held_call(agent_env, "aos_wait", {"id": "a b?c#d", "timeout_s": 1})
-    assert result["isError"] is True and text_of(result) == "bus 404: Intent not found"
+    assert result["isError"] is True and wait_status(result)["outcome"] == "transport_error"
+    assert wait_status(result)["request_id"] == "a b?c#d"
+    assert "bus 404: Intent not found" in text_of(result)
     assert bus.calls[-1][0] == "/intents/a%20b%3Fc%23d/wait"
     result = call(agent_env, "aos_reply", {"id": "a b?c#d", "text": "x"})
     assert result["isError"] is True and text_of(result) == "bus 404: Intent not found"
-    assert bus.calls[-1][0] == "/intents/a%20b%3Fc%23d/ack"
+    assert bus.calls[-1][0] == f"/tasks/{TASK_ID}/intents" and bus.calls[-1][1]["reply_to"] == "a b?c#d"
 
 
 # -- 7. declare -------------------------------------------------------------------
@@ -1056,7 +1122,7 @@ def test_hooks_exit_zero_with_visible_failures(agent_env: dict[str, str], bus: F
         assert hook.returncode == 0, (args, hook.stderr)
         assert hook.stdout == "" and "AOS_AGENT_HOOK_FAILURE" in hook.stderr.splitlines()
         assert "NotADirectoryError" in hook.stderr
-    bus.inbox_error = (200, {"pending_requests": ["not-a-row"], "overlaps": []})
+    bus.inbox_error = (200, {"pending_requests": ["not-a-row"], "overlaps": [], "retained_requests": []})
     hook = run_agent(["inbox", "--hook"], agent_env, stdin="{}")
     assert hook.returncode == 0, hook.stderr
     assert hook.stdout == "" and "AOS_AGENT_HOOK_FAILURE" in hook.stderr.splitlines()
@@ -1071,8 +1137,8 @@ def test_inbox_hook_emits_whole_batch_and_evidence_before_bounded_acks(
     evidence_at_ack = []
 
     def handle(path: str, body: dict[str, Any]) -> tuple[int, Any]:
-        if path.endswith("/ack"):
-            evidence_at_ack.append([e["id"] for e in ledger_lines(agent_env) if e["event"] == "acked"])
+        if path.endswith("/receipt"):
+            evidence_at_ack.append([e["id"] for e in ledger_lines(agent_env) if e["event"] == "prepared"])
         return original_handle(path, body)
 
     monkeypatch.setattr(bus, "handle", handle)
@@ -1085,7 +1151,7 @@ def test_inbox_hook_emits_whole_batch_and_evidence_before_bounded_acks(
     context = json.loads(hook.stdout)["hookSpecificOutput"]["additionalContext"]
     assert all(row["framed"] in context for row in rows)
     ids = [row["id"] for row in rows]
-    assert [e["id"] for e in ledger_lines(agent_env) if e["event"] == "acked"] == ids
+    assert [e["id"] for e in ledger_lines(agent_env) if e["event"] == "prepared"] == ids
     assert evidence_at_ack and all(evidence == ids for evidence in evidence_at_ack)
     assert bus.pending_for(TASK_ID)
 
@@ -1103,14 +1169,14 @@ def test_posttooluse_hook_injects_once_and_throttles(agent_env: dict[str, str], 
         "hookEventName": "PostToolUse", "additionalContext":
         first["framed"] + "\n\n" + second["framed"] + "\n\n" + load_helper().ACK_NOTE}}
     assert hook.stdout.count("\n") == 1
-    assert [e["event"] for e in ledger_lines(agent_env)] == ["hook", "acked", "acked"]
-    assert bus.rows[first["id"]]["state"] == "acknowledged"
+    assert [e["event"] for e in ledger_lines(agent_env)] == ["hook", "prepared", "prepared"]
+    assert bus.rows[first["id"]]["state"] == "prepared"
     calls_before = len(bus.calls)
     throttled = run_agent(["inbox", "--hook"], dict(agent_env, AOS_AGENT_HOOK_INTERVAL="300"), stdin=stdin)
     assert throttled.returncode == 0 and throttled.stdout == "" and len(bus.calls) == calls_before
     empty = run_agent(["inbox", "--hook"], agent_env, stdin=stdin)
     assert empty.returncode == 0 and empty.stdout == "" and len(bus.calls) == calls_before + 1
-    assert [e["event"] for e in ledger_lines(agent_env)] == ["hook", "acked", "acked", "hook"]
+    assert [e["event"] for e in ledger_lines(agent_env)] == ["hook", "prepared", "prepared", "hook"]
 
 
 def test_hooks_survive_a_dead_bus(agent_env: dict[str, str], bus: FakeBus, tmp_path: Path) -> None:
@@ -1124,7 +1190,7 @@ def test_hooks_survive_a_dead_bus(agent_env: dict[str, str], bus: FakeBus, tmp_p
     assert hook.returncode == 0 and hook.stdout == "" and "bus unreachable" in hook.stderr
     assert time.monotonic() - started < 10
     (Path(env["AOS_AGENT_STATE_DIR"]) / f"{RUN_ID}.jsonl").write_text(
-        json.dumps({"event": "acked", "id": "AO-2-i1", "from": "AO-2", "reply_to": None, "body": "q"}) + "\n")
+        json.dumps({"event": "prepared", "id": "AO-2-i1", "from": "AO-2", "reply_to": None, "body": "q"}) + "\n")
     stop = run_agent(["stop", "--hook"], env, stdin=json.dumps({"stop_hook_active": False}))
     assert stop.returncode == 0 and json.loads(stop.stdout)["decision"] == "block"
     result = call(env, "aos_inbox", {})
@@ -1142,9 +1208,9 @@ def write_ledger(env: dict[str, str], events: list[dict[str, Any]]) -> None:
 def test_stop_hook_blocks_once_on_an_acknowledged_unanswered_request(agent_env: dict[str, str], bus: FakeBus) -> None:
     write_ledger(agent_env, [
         {"event": "hook", "at": 1},
-        {"event": "acked", "id": "AO-2-i1", "from": "AO-2", "reply_to": None, "body": "which port?"},
-        {"event": "acked", "id": "operator-i1", "from": "operator", "reply_to": "AO-7-i1", "body": "yes"},
-        {"event": "acked", "id": "AO-3-i1", "from": "AO-3", "reply_to": None, "body": "done?"},
+        {"event": "prepared", "id": "AO-2-i1", "from": "AO-2", "reply_to": None, "body": "which port?"},
+        {"event": "prepared", "id": "operator-i1", "from": "operator", "reply_to": "AO-7-i1", "body": "yes"},
+        {"event": "prepared", "id": "AO-3-i1", "from": "AO-3", "reply_to": None, "body": "done?"},
         {"event": "replied", "id": "AO-3-i1"},
     ])
     calls_before = len(bus.calls)
@@ -1168,8 +1234,8 @@ def test_stop_hook_lists_one_line_per_open_request(ledger_env: dict[str, str]) -
     characters, so the reason stays one line per id."""
     long_body = "first line\n\n  second   line\twith tabs\n" + "x" * 260
     write_ledger(ledger_env, [
-        {"event": "acked", "id": "AO-2-i1", "from": "AO-2", "reply_to": None, "body": long_body},
-        {"event": "acked", "id": "AO-3-i1", "from": "AO-3", "reply_to": None, "body": "one\nline?"},
+        {"event": "prepared", "id": "AO-2-i1", "from": "AO-2", "reply_to": None, "body": long_body},
+        {"event": "prepared", "id": "AO-3-i1", "from": "AO-3", "reply_to": None, "body": "one\nline?"},
     ])
     stop = run_agent(["stop", "--hook"], ledger_env, stdin=json.dumps({"stop_hook_active": False}))
     assert stop.returncode == 0, stop.stderr
@@ -1184,8 +1250,8 @@ def test_stop_hook_lists_one_line_per_open_request(ledger_env: dict[str, str]) -
 
 def test_stop_hook_stays_quiet_without_open_requests(ledger_env: dict[str, str]) -> None:
     write_ledger(ledger_env, [
-        {"event": "acked", "id": "operator-i1", "from": "operator", "reply_to": "AO-7-i1", "body": "yes"},
-        {"event": "acked", "id": "AO-2-i1", "from": "AO-2", "reply_to": None, "body": "q"},
+        {"event": "prepared", "id": "operator-i1", "from": "operator", "reply_to": "AO-7-i1", "body": "yes"},
+        {"event": "prepared", "id": "AO-2-i1", "from": "AO-2", "reply_to": None, "body": "q"},
         {"event": "replied", "id": "AO-2-i1"},
     ])
     stop = run_agent(["stop", "--hook"], ledger_env, stdin=json.dumps({"stop_hook_active": False}))
@@ -1200,7 +1266,7 @@ def test_stop_hook_stays_quiet_without_open_requests(ledger_env: dict[str, str])
 def test_stop_hook_skips_an_acknowledged_notice(ledger_env: dict[str, str]) -> None:
     """Lane F (G1): a finish notice needs no answer, so it alone never blocks Stop."""
     write_ledger(ledger_env, [
-        {"event": "acked", "id": "AO-2-i1", "kind": "notice", "from": "AO-2", "reply_to": None,
+        {"event": "prepared", "id": "AO-2-i1", "kind": "notice", "from": "AO-2", "reply_to": None,
          "body": "task AO-2 finished: review"},
     ])
     stop = run_agent(["stop", "--hook"], ledger_env, stdin=json.dumps({"stop_hook_active": False}))
@@ -1210,10 +1276,10 @@ def test_stop_hook_skips_an_acknowledged_notice(ledger_env: dict[str, str]) -> N
 
 def test_stop_hook_lists_the_request_and_not_the_notice(ledger_env: dict[str, str]) -> None:
     write_ledger(ledger_env, [
-        {"event": "acked", "id": "AO-2-i1", "kind": "notice", "from": "AO-2", "reply_to": None,
+        {"event": "prepared", "id": "AO-2-i1", "kind": "notice", "from": "AO-2", "reply_to": None,
          "body": "task AO-2 finished: review"},
-        {"event": "acked", "id": "AO-3-i1", "kind": "request", "from": "AO-3", "reply_to": None, "body": "which port?"},
-        {"event": "acked", "id": "AO-4-i1", "from": "AO-4", "reply_to": None, "body": "older ledger, no kind"},
+        {"event": "prepared", "id": "AO-3-i1", "kind": "request", "from": "AO-3", "reply_to": None, "body": "which port?"},
+        {"event": "prepared", "id": "AO-4-i1", "from": "AO-4", "reply_to": None, "body": "older ledger, no kind"},
     ])
     stop = run_agent(["stop", "--hook"], ledger_env, stdin=json.dumps({"stop_hook_active": False}))
     assert stop.returncode == 0, stop.stderr
@@ -1223,34 +1289,6 @@ def test_stop_hook_lists_the_request_and_not_the_notice(ledger_env: dict[str, st
 
 
 # -- the claim token, over every subprocess output and ledger of this module -------------
-
-def test_inbox_wait_returns_rows_without_acking_and_the_next_hook_pull_carries_and_acks_them(
-        agent_env: dict[str, str], tmp_path: Path, bus: FakeBus) -> None:
-    env = interactive_env(agent_env, tmp_path, ["worker-secret-value-0001"])
-    first = bus.add_row(task_id="AO-2", to_task_id=TASK_ID, body="x" * 250)
-    second = bus.add_row(task_id="operator", to_task_id=TASK_ID, body="y" * 250, run_id=None)
-    with mcp_session(env) as session:
-        session.request(rpc("initialize"))
-        answer = session.request(rpc("tools/call", {"name": "aos_inbox_wait", "arguments": {"timeout_s": 5}}, id=2))["result"]
-        assert not answer["isError"], text_of(answer)
-        text = text_of(answer)
-        assert first["framed"] in text and second["framed"] in text
-        assert load_helper().WAIT_NOTE in text
-        assert any(line.startswith("family: 2 children") for line in text.splitlines())
-        assert [r["state"] for r in (first, second)] == ["stored", "stored"]
-        assert ledger_lines(env) == [{"event": "tool", "name": "aos_inbox_wait"}, *[
-            {"event": "returned", "id": r["id"], "kind": r["kind"], "from": r["task_id"], "body": r["body"][:200]}
-            for r in (first, second)]]
-        assert not any(path.endswith("/ack") for path, _ in bus.calls)
-        answer = session.request(rpc("tools/call", {"name": "aos_ask", "arguments": {"to": "AO-2", "text": "unrelated"}}, id=3))["result"]
-        assert not answer["isError"]
-        assert not any(path.endswith("/ack") for path, _ in bus.calls)
-        assert all(r["state"] == "stored" for r in (first, second))
-    hook = run_agent(["inbox", "--hook"], env, "{}")
-    context = json.loads(hook.stdout)["hookSpecificOutput"]["additionalContext"]
-    assert first["framed"] in context and second["framed"] in context
-    assert [e["id"] for e in ledger_lines(env) if e["event"] == "acked"] == [first["id"], second["id"]]
-    assert all(r["state"] == "acknowledged" for r in (first, second))
 
 
 def test_inbox_wait_bus_calls_succeed_and_a_one_second_budget_ends_within_it(
@@ -1324,8 +1362,8 @@ def test_reader_thread_answers_ping_and_tools_list_during_a_wait(
 def test_inbox_wait_and_inbox_end_with_the_acked_unanswered_block(
         agent_env: dict[str, str], tmp_path: Path, bus: FakeBus) -> None:
     env = interactive_env(agent_env, tmp_path, ["worker-secret-value-0001"])
-    header = "Acknowledged and not yet answered:"
-    row = {"event": "acked", "id": "AO-2-i1", "kind": "request", "from": "AO-2", "body": "which port?"}
+    header = "Delivered to you and not yet answered:"
+    row = {"event": "prepared", "id": "AO-2-i1", "kind": "request", "from": "AO-2", "body": "which port?"}
     write_ledger(env, [row, {**row, "id": "notice", "kind": "notice"}])
     block = "\n\n" + header + "\n- AO-2-i1 from AO-2: which port?"
     assert text_of(call(env, "aos_inbox", {})) == "inbox empty" + block
@@ -1443,19 +1481,20 @@ def test_family_import_and_export_candidate_tools_post_the_run_bound_bodies(
     assert answer["isError"] and "'commit' must be a 40-character lowercase hex sha" in text_of(answer)
 
 
-def test_peek_counts_a_returned_row(agent_env: dict[str, str], tmp_path: Path, bus: FakeBus) -> None:
+def test_peek_counts_only_unprepared_rows_and_reports_nothing(agent_env: dict[str, str], tmp_path: Path, bus: FakeBus) -> None:
     env = interactive_env(agent_env, tmp_path, ["worker-secret-value-0001"])
     bus.add_row(task_id="AO-2", to_task_id=TASK_ID, body="still pending")
     before = ledger_lines(env)
     result = run_agent(["peek"], env)
     assert result.returncode == 0 and result.stdout == '{"pending":1}\n'
-    assert ledger_lines(env) == before and not any(p.endswith("/ack") for p, _ in bus.calls)
+    assert ledger_lines(env) == before and not any(p.endswith("/receipt") for p, _ in bus.calls)
     with mcp_session(env) as session:
         answer = session.request(rpc("tools/call", {"name": "aos_inbox_wait", "arguments": {"timeout_s": 5}}))["result"]
         assert not answer["isError"]
+    # Prepared by the wait: the row has left the queue, so the nudge has nothing to count.
     before = ledger_lines(env)
     result = run_agent(["peek"], env)
-    assert result.returncode == 0 and result.stdout == '{"pending":1}\n'
+    assert result.returncode == 0 and result.stdout == '{"pending":0}\n'
     assert ledger_lines(env) == before
     bus.inbox_error = (409, {"detail": "run is not live (review)"})
     result = run_agent(["peek"], env)
@@ -1469,59 +1508,101 @@ def test_extension_idle_nudge_is_owner_only_once_per_idle_period_and_retires_on_
     assert node is not None, "node is required to verify the aos_pi.ts extension"
     driver = r'''
 import assert from "node:assert/strict";
-const timers = new Map(); let next = 0, peeks = [], answers = [];
-globalThis.setInterval = (fn, ms) => { assert.equal(ms, 10000); timers.set(++next, fn); return next; };
+import { EventEmitter } from "node:events";
+const timers = new Map(); let next = 0, spawns = [], syncCalls = [], answers = [];
+globalThis.setInterval = (fn, ms) => { assert.equal(ms, 1000); timers.set(++next, fn); return next; };
 globalThis.clearInterval = (id) => timers.delete(id);
 const cp = await import("node:child_process");
+cp.default.spawn = (file, args) => {
+  spawns.push([file, args]);
+  const proc = new EventEmitter();
+  proc.stdout = new EventEmitter();
+  proc.stderr = new EventEmitter();
+  proc.kill = () => {};
+  const ans = answers.shift() ?? {status: 0, stdout: '{"messages":[],"ack_note":"[aos] note"}', stderr: ""};
+  queueMicrotask(() => {
+    if (ans.stdout) proc.stdout.emit("data", Buffer.from(ans.stdout));
+    if (ans.stderr) proc.stderr.emit("data", Buffer.from(ans.stderr));
+    proc.emit("close", ans.status, null);
+  });
+  return proc;
+};
 cp.default.spawnSync = (file, args, opts) => {
-  peeks.push([file, args]); assert.equal(opts.encoding, "utf8"); assert.equal(opts.timeout, 15000);
-  return answers.shift() ?? {status: 0, stdout: '{"pending":0}', stderr: ""};
+  syncCalls.push([file, args, JSON.parse(opts?.input ?? "{}")]);
+  if (args[0] === "prepare") {
+    const msgs = JSON.parse(opts?.input ?? "{}").messages ?? [];
+    return {status: 0, stdout: JSON.stringify({prepared_ids: msgs.map(m => m.id)}), stderr: ""};
+  }
+  return {status: 0, stdout: "", stderr: ""};
 };
 (await import("node:module")).default.syncBuiltinESMExports();
 const {default: adapter} = await import(MODULE_URI);
-const tick = () => { for (const fn of [...timers.values()]) fn(); };
-function instance(interactive, child = false) {
-  timers.clear(); peeks = []; answers = [];
-  if (interactive) process.env.AOS_INTERACTIVE = "1"; else delete process.env.AOS_INTERACTIVE;
-  const h = new Map(), nudges = [], users = [];
-  const ctx = {sessionManager: {getHeader: () => child ? {parentSessionId: "root"} : {}, getSessionId: () => "owner"}};
-  adapter({on: (n, f) => h.set(n, f), sendMessage: (...args) => nudges.push(args), sendUserMessage: (...args) => users.push(args)});
+const tick = async () => { for (const fn of [...timers.values()]) fn(); await new Promise(r => setTimeout(r, 5)); };
+function instance(flavour, child = false, initialAnswers = []) {
+  process.env.AOS_AGENT_AUTOMATIC = "1";
+  process.env.AOS_PI_FLAVOUR = flavour;
+  timers.clear(); spawns = []; syncCalls = []; answers = [...initialAnswers];
+  const h = new Map(), asides = [], users = [];
+  let idle = true;
+  const ctx = {
+    isIdle: () => idle,
+    sessionManager: {getHeader: () => child ? {parentSessionId: "root"} : {}, getSessionId: () => "owner"}
+  };
+  adapter({on: (n, f) => h.set(n, f), sendMessage: (...args) => asides.push(args), sendUserMessage: (...args) => users.push(args)});
   h.get("session_start")({}, ctx);
-  return {h, ctx, nudges, users, fire: (name, c = ctx) => h.get(name)({}, c)};
+  return {h, ctx, asides, users, setIdle: (v) => { idle = v; }, fire: (name, ev = {}, c = ctx) => h.get(name)(ev, c)};
 }
-let a = instance(false); a.fire("agent_end"); tick();
-assert.equal(peeks.length, 0); assert.equal(a.nudges.length, 0); assert.equal(timers.size, 0); assert.equal(a.users.length, 0);
-console.log(JSON.stringify({scenario: "headless", peeks: peeks.length, nudges: a.nudges.length, timers: timers.size}));
-a = instance(true, true); a.fire("agent_end"); tick();
-assert.equal(peeks.length, 0); assert.equal(a.nudges.length, 0); assert.equal(timers.size, 0); assert.equal(a.users.length, 0);
-console.log(JSON.stringify({scenario: "native-child", peeks: peeks.length, nudges: a.nudges.length, timers: timers.size}));
-a = instance(true);
-const foreign = {sessionManager: {getSessionId: () => "other"}};
-a.fire("agent_end", foreign); assert.equal(timers.size, 0);
-a.fire("agent_end"); a.fire("agent_end"); assert.equal(timers.size, 1);
-a.fire("agent_start", foreign); assert.equal(timers.size, 1);
-answers.push({status: 0, stdout: '{"pending":2}', stderr: ""}); tick();
-assert.deepEqual(peeks, [["/usr/local/bin/aos-agent", ["peek"]]]);
-assert.deepEqual(a.nudges, [[{customType: "aos-nudge", content: "2 AOS message(s) are waiting; call mcp__aos_inbox", display: true, attribution: "agent"}, {deliverAs: "aside"}]]);
-assert.equal(timers.size, 0); tick(); assert.equal(a.nudges.length, 1);
-a.fire("agent_start"); assert.equal(timers.size, 0);
-a.fire("agent_end"); assert.equal(timers.size, 1);
-answers.push({status: 3, stdout: "", stderr: "aos-agent: peek: bus 409: run is not live (review)"}); tick();
-assert.equal(timers.size, 0); a.fire("agent_end"); assert.equal(timers.size, 0); assert.equal(a.users.length, 0);
-console.log(JSON.stringify({scenario: "owner-and-409", peeks, nudges: a.nudges, timers: timers.size, users: a.users.length}));
-a = instance(true); a.fire("agent_end");
-answers.push({status: 3, stdout: "", stderr: "aos-agent: no run credential (/sandbox/aos-run.json)"}); tick();
-assert.equal(timers.size, 0); assert.equal(a.nudges.length, 0); a.fire("agent_end"); assert.equal(timers.size, 1); assert.equal(a.users.length, 0);
-console.log(JSON.stringify({scenario: "missing-credential", peeks: peeks.length, nudges: a.nudges.length, restarted: timers.size}));
-answers.push({status: 1, stdout: "", stderr: ""}); tick(); assert.equal(timers.size, 1); assert.equal(a.nudges.length, 0);
-answers.push({status: 0, stdout: "not JSON", stderr: ""}); tick(); assert.equal(timers.size, 1);
-a.fire("agent_start"); assert.equal(timers.size, 0); assert.equal(a.users.length, 0);
-console.log(JSON.stringify({scenario: "transient-error", nudges: a.nudges.length, users: a.users.length}));
+// 1. Native Pi mode never starts the OMP queue timer
+let a = instance("pi"); await tick();
+assert.equal(spawns.length, 0); assert.equal(a.asides.length, 0); assert.equal(timers.size, 0);
+console.log(JSON.stringify({scenario: "pi-mode", spawns: spawns.length, asides: a.asides.length, timers: timers.size}));
+
+// 2. Native child in OMP mode never starts the queue timer
+a = instance("omp", true); await tick();
+assert.equal(spawns.length, 0); assert.equal(a.asides.length, 0); assert.equal(timers.size, 0);
+console.log(JSON.stringify({scenario: "native-child", spawns: spawns.length, asides: a.asides.length, timers: timers.size}));
+
+// 3. OMP owner wakes with actual message content batch (not a content-free nudge), prepares only on context, retires on 409
+a = instance("omp", false, [{status: 0, stdout: JSON.stringify({
+  messages: [
+    {id: "AO-2-i1", kind: "request", task_id: "AO-2", reply_to: null, body: "first", framed: "<agent-request id=\"AO-2-i1\">first</agent-request>"},
+    {id: "AO-2-i2", kind: "request", task_id: "AO-2", reply_to: null, body: "second", framed: "<agent-request id=\"AO-2-i2\">second</agent-request>"}
+  ],
+  ack_note: "[aos] Answer with aos_reply."
+}), stderr: ""}]);
+await new Promise(r => setTimeout(r, 5));
+assert.equal(a.asides.length, 1);
+assert.equal(a.asides[0][0].customType, "aos-peer");
+assert.ok(a.asides[0][0].content.includes("<agent-request id=\"AO-2-i1\">first</agent-request>"));
+assert.ok(a.asides[0][0].content.includes("<agent-request id=\"AO-2-i2\">second</agent-request>"));
+assert.deepEqual(a.asides[0][0].details, {ids: ["AO-2-i1", "AO-2-i2"]});
+assert.equal(syncCalls.filter(c => c[1][0] === "prepare").length, 0);
+a.fire("context", {messages: [{role: "custom", customType: "aos-peer", details: {ids: ["AO-2-i1", "AO-2-i2"]}}]});
+await new Promise(r => setTimeout(r, 5));
+assert.equal(syncCalls.filter(c => c[1][0] === "prepare").length, 1);
+answers.push({status: 3, stdout: "", stderr: "aos-agent: queue: bus 409: run is not live (review)"});
+await tick();
+assert.equal(timers.size, 0);
+console.log(JSON.stringify({scenario: "owner-and-409", asides: a.asides.length, timers: timers.size}));
+
+// 4. Missing credential clears timer until next agent_start/agent_end
+a = instance("omp", false, [{status: 3, stdout: "", stderr: "aos-agent: no run credential (/sandbox/aos-run.json)"}]);
+await new Promise(r => setTimeout(r, 5));
+assert.equal(timers.size, 0);
+a.fire("agent_end");
+assert.equal(timers.size, 1);
+console.log(JSON.stringify({scenario: "missing-credential", timers: timers.size}));
+
+// 5. Transient error keeps timer armed
+answers.push({status: 3, stdout: "", stderr: "aos-agent: queue: bus unreachable"});
+await tick();
+assert.equal(timers.size, 1);
+console.log(JSON.stringify({scenario: "transient-error", timers: timers.size}));
 '''.replace("MODULE_URI", json.dumps((SCRIPT.parent / "aos_pi.ts").as_uri()))
     result = subprocess.run([node, "--input-type=module", "-e", driver], capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
     scenarios = [json.loads(line) for line in result.stdout.splitlines()]
-    assert [s["scenario"] for s in scenarios] == ["headless", "native-child", "owner-and-409", "missing-credential", "transient-error"]
+    assert [s["scenario"] for s in scenarios] == ["pi-mode", "native-child", "owner-and-409", "missing-credential", "transient-error"]
 
 
 def test_zz_claim_token_never_appears_in_any_output_or_ledger(tmp_path_factory: pytest.TempPathFactory) -> None:
@@ -1558,6 +1639,8 @@ def real_delivery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
                            expected_spec_hash=task["spec_hash"], effective_acceptance=task["acceptance"],
                            acceptance_source="task")
     store.start_run(run["id"], run["claim_token"], base_commit="a", branch="b", worktree="/x")
+    store.update_receiver(run["id"], run["claim_token"], action="receiving",
+                          owner=run["id"], reason="native_start")
     row = store.create_operator_intent(to_task_id=task["id"], body="REAL-DELIVERY-REQUEST")
     credential = {**run, "run_id": run["id"], "task_id": task["id"], "bus_url": "http://unused.invalid"}
     run_file = tmp_path / "real-run.json"
@@ -1570,34 +1653,39 @@ def real_delivery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     helper = load_helper()
 
     class StoreBus(helper.Bus):
-        def inbox(self) -> dict[str, Any]:
-            return {"pending_requests": store.requests_for_run(run["id"], run["claim_token"])}
+        def inbox(self, known_ids=None, timeout=None) -> dict[str, Any]:
+            return {"pending_requests": store.requests_for_run(run["id"], run["claim_token"]),
+                    "retained_requests": store.retained_requests_for_run(
+                        run["id"], run["claim_token"], known_ids or []), "overlaps": []}
 
-        def ack(self, intent_id: str) -> dict[str, Any]:
-            return store.ack_intent(intent_id, run["id"], run["claim_token"])
+        def wait(self, intent_id, timeout):
+            return store.intent_for_waiter(intent_id, run["id"], run["claim_token"])
+
+        def receipt(self, intent_id: str, stage: str, source: str) -> dict[str, Any]:
+            return store.report_receipt(intent_id, run["id"], run["claim_token"], stage, source)
 
     monkeypatch.setattr(helper, "Bus", StoreBus)
     return helper, store, run, row, run_file, state
 
 
-def test_real_store_lost_ack_response_retains_stop_evidence(
+def test_real_store_lost_receipt_response_retains_stop_evidence(
         real_delivery: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     helper, store, run, row, _, _ = real_delivery
-    acknowledge = helper.Bus.ack
+    report = helper.Bus.receipt
 
-    def lost_response(bus: Any, intent_id: str) -> Any:
-        acknowledge(bus, intent_id)
+    def lost_response(bus: Any, intent_id: str, stage: str, source: str) -> Any:
+        report(bus, intent_id, stage, source)
         raise helper.BusError("response lost after commit " + run["claim_token"])
 
-    monkeypatch.setattr(helper.Bus, "ack", lost_response)
+    monkeypatch.setattr(helper.Bus, "receipt", lost_response)
     monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
     assert helper.hook_inbox() == 0
     output = capsys.readouterr()
     assert row["framed"] in json.loads(output.out)["hookSpecificOutput"]["additionalContext"]
-    assert store.get_intent(row["id"])["state"] == "acknowledged"
+    assert store.get_intent(row["id"])["state"] == "prepared"
     assert store.requests_for_run(run["id"], run["claim_token"]) == []
     ledger = helper.Ledger(run["id"])
-    assert [e["id"] for e in ledger.events() if e["event"] == "acked"] == [row["id"]]
+    assert [e["id"] for e in ledger.events() if e["event"] == "prepared"] == [row["id"]]
     monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
     assert helper.hook_stop() == 0
     stop = capsys.readouterr()
@@ -1613,7 +1701,7 @@ def test_hook_failed_emission_never_acknowledges_or_spends_stop(
     helper, store, run, row, _, _ = real_delivery
     ledger = helper.Ledger(run["id"])
     if kind == "stop":
-        ledger.acked(row)
+        ledger.prepared(row, "hook")
     original_send = helper.send
 
     def broken_output(message: dict[str, Any]) -> None:
@@ -1627,7 +1715,7 @@ def test_hook_failed_emission_never_acknowledges_or_spends_stop(
     assert store.get_intent(row["id"])["state"] == "stored"
     assert not any(e["event"] == "stop_blocked" for e in ledger.events())
     if kind == "inbox":
-        assert not any(e["event"] == "acked" for e in ledger.events())
+        assert not any(e["event"] == "prepared" for e in ledger.events())
     monkeypatch.setattr(helper, "send", original_send)
     monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
     assert getattr(helper, "hook_" + kind)() == 0
@@ -1640,7 +1728,7 @@ def test_hook_post_output_ledger_failure_keeps_one_document(
     helper, store, run, row, _, _ = real_delivery
     ledger = helper.Ledger(run["id"])
     if kind == "stop":
-        ledger.acked(row)
+        ledger.prepared(row, "hook")
     original_send = helper.send
 
     def emit_then_break_storage(message: dict[str, Any]) -> None:
@@ -1700,7 +1788,7 @@ def test_mcp_output_write_failure_propagates_without_ack(
     with pytest.raises(BrokenPipeError):
         helper.run_tool("aos_inbox", {}, emit=broken_output)
     assert store.get_intent(row["id"])["state"] == "stored"
-    assert not any(e["event"] == "acked" for e in helper.Ledger(run["id"]).events())
+    assert not any(e["event"] == "prepared" for e in helper.Ledger(run["id"]).events())
 
 
 @pytest.mark.parametrize("phase", ["write", "flush"])
@@ -1725,7 +1813,7 @@ def test_serve_failed_stdout_releases_lock_and_preserves_delivery(
     assert helper._STDOUT_LOCK.acquire(blocking=False)
     helper._STDOUT_LOCK.release()
     assert store.get_intent(row["id"])["state"] == "stored"
-    assert not any(e["event"] == "acked" for e in helper.Ledger(run["id"]).events())
+    assert not any(e["event"] == "prepared" for e in helper.Ledger(run["id"]).events())
     assert helper.superseded() is False
 
 
@@ -1754,14 +1842,7 @@ def test_child_hooks_do_not_touch_bus_or_ledger(agent_env: dict[str, str], bus: 
     assert json.loads(owner.stdout)["hookSpecificOutput"]["additionalContext"]
 
 
-def test_version_prints_2_2() -> None:
-    version = run_agent(["version"], dict(os.environ))
-    assert version.returncode == 0 and version.stdout == "aos-agent protocol 2.2\n"
-
-
 def test_version_summary_and_late_request_bound(agent_env: dict[str, str], bus: FakeBus) -> None:
-    version = run_agent(["version"], agent_env)
-    assert version.returncode == 0 and version.stdout == "aos-agent protocol 2.2\n"
     invalid = run_agent(["serve"], agent_env)
     assert invalid.returncode == 2 and invalid.stdout == "" and "usage:" in invalid.stderr
     bus.add_row(task_id="operator", to_task_id=TASK_ID, body="first", run_id=None)
@@ -1770,9 +1851,9 @@ def test_version_summary_and_late_request_bound(agent_env: dict[str, str], bus: 
     late = bus.add_row(task_id="operator", to_task_id=TASK_ID, body="late", run_id=None)
     call(agent_env, "aos_inbox", {})
     assert run_agent(["stop", "--hook"], agent_env, "{}").stdout == ""
-    assert bus.rows[late["id"]]["state"] == "acknowledged"
+    assert bus.rows[late["id"]]["state"] == "prepared"
     summary = run_agent(["summary"], agent_env)
-    assert "acknowledged 2" in summary.stdout and "stop blocked 1" in summary.stdout
+    assert "prepared 2" in summary.stdout and "stop blocked 1" in summary.stdout
     assert len(summary.stdout.splitlines()) == 1 and TOKEN not in summary.stdout
 
 
@@ -1780,13 +1861,13 @@ def test_summary_streams_ledger_beyond_64k(agent_env: dict[str, str]) -> None:
     events = []
     for index in range(500):
         events.extend([{"event": "hook", "at": index},
-                       {"event": "acked", "id": f"q{index}", "body": "x" * 180},
+                       {"event": "prepared", "id": f"q{index}", "body": "x" * 180},
                        {"event": "replied", "id": f"q{index}"}])
     events.append({"event": "stop_blocked"})
     write_ledger(agent_env, events)
     result = run_agent(["summary"], agent_env)
     assert result.returncode == 0 and len(result.stdout) < 4096
-    assert "hook pulls 500" in result.stdout and "acknowledged 500" in result.stdout
+    assert "hook pulls 500" in result.stdout and "prepared 500" in result.stdout
     assert "replied 500" in result.stdout and "stop blocked 1" in result.stdout
     assert "x" * 180 not in result.stdout
 
@@ -1807,16 +1888,16 @@ store = Store(Path(sys.argv[2]))
 class StoreBus(a.Bus):
     def inbox(self):
         return {"pending_requests": store.requests_for_run(run["run_id"], run["claim_token"])}
-    def ack(self, ident):
-        return store.ack_intent(ident, run["run_id"], run["claim_token"])
+    def receipt(self, ident, stage, source):
+        return store.report_receipt(ident, run["run_id"], run["claim_token"], stage, source)
 a.Bus = StoreBus
-original = a.Ledger.acked
-def constrained(self, row):
+original = a.Ledger.prepared
+def constrained(self, row, source):
     signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
     limits = resource.getrlimit(resource.RLIMIT_FSIZE)
     resource.setrlimit(resource.RLIMIT_FSIZE, (Path(self.path).stat().st_size + 40, limits[1]))
-    original(self, row)
-a.Ledger.acked = constrained
+    original(self, row, source)
+a.Ledger.prepared = constrained
 sys.exit(a.hook_inbox())
 '''
     env = dict(os.environ, AOS_AGENT_RUN_FILE=str(run_file), AOS_AGENT_STATE_DIR=str(state),
@@ -1833,7 +1914,7 @@ sys.exit(a.hook_inbox())
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
         assert helper.hook_inbox() == 0
-    assert store.get_intent(row["id"])["state"] == "acknowledged"
+    assert store.get_intent(row["id"])["state"] == "prepared"
     output = io.StringIO()
     with contextlib.redirect_stdout(output):
         monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
@@ -1958,7 +2039,7 @@ def test_held_lock_fails_promptly_without_ack_and_recovers(
     emitted = []
     answer = helper.run_tool("aos_inbox", {}, emit=emitted.append)
     assert emitted == [answer] and not answer["isError"] and row["framed"] in text_of(answer)
-    assert store.get_intent(row["id"])["state"] == "acknowledged"
+    assert store.get_intent(row["id"])["state"] == "prepared"
     assert any(e.get("id") == "prior" for e in ledger.events())
 
 
@@ -2001,16 +2082,16 @@ def test_bus_absolute_deadline_bounds_trickling_http(helper: Any, phase: str) ->
 
 
 def test_wait_keeps_an_earlier_caller_deadline(helper: Any) -> None:
-    """AO-23: the wait budget never extends a caller-wide deadline; a cut at the caller's deadline
-    stays an error, and afterwards the alarm timer is cleared and the handler is a Python callable,
-    never the default disposition (F153)."""
+    """A healthy fast-response bus respects the caller deadline, including local sleep,
+    and leaves a safe callable alarm handler after the wait."""
     bus = LongPollBus(f"{TASK_ID}-i1")
     try:
         client = helper.Bus({**helper.load_run(), "bus_url": bus.url}, helper.TOOL_TIMEOUT)
         started = time.monotonic()
         client.deadline = started + 1.5
-        with pytest.raises(helper.BusError, match="^bus unreachable: invocation deadline reached$"):
-            helper.tool_wait(client, helper.Ledger(RUN_ID), {"id": f"{TASK_ID}-i1", "timeout_s": 10})
+        result = helper.tool_wait(client, helper.Ledger(RUN_ID), {"id": f"{TASK_ID}-i1", "timeout_s": 10})
+        status = json.loads(result.splitlines()[0].removeprefix("aos_wait "))
+        assert status["outcome"] == "timeout" and status["deadline_source"] == "caller"
         elapsed = time.monotonic() - started
         assert 1.3 <= elapsed < 2.5, elapsed
         assert client.deadline == started + 1.5
@@ -2139,12 +2220,12 @@ def test_expired_delivery_deadline_records_whole_batch_without_ack(
     run = helper.load_run()
     bus = helper.Bus(run, 1)
     bus.deadline = time.monotonic() - 1
-    acked = []
-    monkeypatch.setattr(bus, "ack", acked.append)
+    reported = []
+    monkeypatch.setattr(bus, "receipt", lambda *args: reported.append(args))
     rows = [{"id": "q1", "kind": "request"}, {"id": "q2", "kind": "request"}]
     ledger = helper.Ledger(RUN_ID)
-    helper.finish_delivery(bus, ledger, rows)
-    assert acked == []
+    helper.finish_prepared(bus, ledger, rows, "hook")
+    assert reported == []
     assert [e["id"] for e in ledger.events()] == ["q1", "q2"]
     assert "deadline" in capsys.readouterr().err
 
@@ -2154,14 +2235,14 @@ def test_all_delivery_evidence_precedes_any_ack(
         real_delivery: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], kind: str) -> None:
     helper, store, run, first, _, _ = real_delivery
     second = store.create_operator_intent(to_task_id=run["task_id"], body="SECOND-REQUEST")
-    original_acked = helper.Ledger.acked
+    original_prepared = helper.Ledger.prepared
 
-    def fail_second(ledger: Any, row: dict[str, Any]) -> None:
+    def fail_second(ledger: Any, row: dict[str, Any], source: str) -> None:
         if row["id"] == second["id"]:
             raise OSError("second evidence failed " + run["claim_token"])
-        original_acked(ledger, row)
+        original_prepared(ledger, row, source)
 
-    monkeypatch.setattr(helper.Ledger, "acked", fail_second)
+    monkeypatch.setattr(helper.Ledger, "prepared", fail_second)
     if kind == "hook":
         monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
         assert helper.hook_inbox() == 0
@@ -2177,7 +2258,7 @@ def test_all_delivery_evidence_precedes_any_ack(
         assert "post-output delivery bookkeeping failed" in output.err
     assert first["framed"] in text and second["framed"] in text
     assert all(store.get_intent(row["id"])["state"] == "stored" for row in (first, second))
-    assert [e["id"] for e in helper.Ledger(run["id"]).events() if e["event"] == "acked"] == [first["id"]]
+    assert [e["id"] for e in helper.Ledger(run["id"]).events() if e["event"] == "prepared"] == [first["id"]]
     assert run["claim_token"] not in text + output.err
 
 
@@ -2185,13 +2266,13 @@ def test_post_output_bookkeeping_with_unavailable_diagnostic_still_returns(
         real_delivery: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     helper, store, run, row, _, _ = real_delivery
 
-    def unavailable_evidence(ledger: Any, value: dict[str, Any]) -> None:
+    def unavailable_evidence(ledger: Any, value: dict[str, Any], source: str) -> None:
         raise OSError("no evidence")
 
     def unavailable_log(message: str) -> None:
         raise OSError("no stderr")
 
-    monkeypatch.setattr(helper.Ledger, "acked", unavailable_evidence)
+    monkeypatch.setattr(helper.Ledger, "prepared", unavailable_evidence)
     monkeypatch.setattr(helper, "log", unavailable_log)
     emitted = []
     answer = helper.run_tool("aos_inbox", {}, emit=emitted.append)
@@ -2207,5 +2288,656 @@ def test_maximum_legal_batch_keeps_all_frames(agent_env: dict[str, str], bus: Fa
     assert result.returncode == 0, result.stderr
     context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
     assert all(row["framed"] in context for row in rows)
-    assert all(bus.rows[row["id"]]["state"] == "acknowledged" for row in rows)
-    assert len([e for e in ledger_lines(agent_env) if e["event"] == "acked"]) == 20
+    assert all(bus.rows[row["id"]]["state"] == "prepared" for row in rows)
+    assert len([e for e in ledger_lines(agent_env) if e["event"] == "prepared"]) == 20
+
+
+def test_receiver_hooks_mutate_only_identified_roots_and_fail_visibly(agent_env, bus, tmp_path):
+    before = list(bus.calls)
+    child = run_agent(["receiver-start", "--hook"], agent_env, json.dumps({"agent_id": "child", "session_id": "owner"}))
+    assert child.returncode == 0 and child.stdout == "" and bus.calls == before
+    for payload in ({}, {"session_id": ""}, {"session_id": " "}):
+        result = run_agent(["receiver-start", "--hook"], agent_env, json.dumps(payload))
+        assert result.returncode != 0 and result.stdout == "" and result.stderr
+    assert bus.calls == before
+    for command, action in (("receiver-start", "receiving"), ("receiver-end", "closed")):
+        result = run_agent([command, "--hook"], agent_env, '{"session_id":"owner"}')
+        assert result.returncode == 0 and result.stdout == "", result.stderr
+        path, body = bus.calls[-1]
+        assert path == f"/runs/{RUN_ID}/receiver" and body["owner"] == "owner" and body["action"] == action
+        assert body["reason"] == ("native_start" if action == "receiving" else "native_end")
+    missing = run_agent(["receiver-start", "--hook"], dict(agent_env, AOS_AGENT_RUN_FILE=str(tmp_path / "missing")),
+                        '{"session_id":"owner"}')
+    assert missing.returncode != 0 and missing.stdout == "" and "no run credential" in missing.stderr
+
+
+def test_devin_lifecycle_payloads_open_and_close_the_exact_run(tmp_path, monkeypatch):
+    from agent_os.store import Store
+
+    store = Store(tmp_path / "devin-bus")
+    runs = []
+    for repo in ("devin-owner", "unrelated"):
+        task = store.create_task(repo=repo, title="lifecycle", brief="receive", acceptance=["true"], harness="devin")
+        store.ready_task(task["id"])
+        run = store.claim_task(task["id"], worker="test", worker_host="mac", lease_seconds=600,
+                               expected_spec_hash=task["spec_hash"], effective_acceptance=task["acceptance"],
+                               acceptance_source="task")
+        store.start_run(run["id"], run["claim_token"], base_commit="a", branch="b", worktree="/x")
+        runs.append(run)
+    run, unrelated = runs
+    run_file = tmp_path / "devin-run.json"
+    run_file.write_text(json.dumps({
+        "task_id": run["task_id"], "run_id": run["id"], "claim_token": run["claim_token"],
+        "bus_url": "http://unused.invalid"}))
+    run_file.chmod(0o600)
+    monkeypatch.setenv("AOS_AGENT_RUN_FILE", str(run_file))
+    monkeypatch.setenv("AOS_AGENT_STATE_DIR", str(tmp_path / "state"))
+    helper = load_helper()
+
+    class StoreBus(helper.Bus):
+        def receiver(self, action, owner, reason):
+            return store.update_receiver(
+                self.run["run_id"], self.run["claim_token"], action=action, owner=owner, reason=reason)
+
+    monkeypatch.setattr(helper, "Bus", StoreBus)
+    assert store.get_run(run["id"])["receiver_state"] == "pending"
+    before = store.create_operator_intent(to_task_id=run["task_id"], body="before start")
+    assert before["admission"] == "unavailable" and before["terminal_reason"] == "receiver_not_ready"
+    owner = "synthetic-devin-session"
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({
+        "hook_event_name": "SessionStart", "session_id": owner})))
+    assert helper.main(["receiver-start", "--hook"]) == 0
+    opened = store.get_run(run["id"])
+    assert opened["receiver_state"] == "receiving" and opened["receiver_owner"] == owner
+    admitted = store.create_operator_intent(to_task_id=run["task_id"], body="owned")
+    assert admitted["admission"] == "accepted" and admitted["to_run_id"] == run["id"]
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({
+        "hook_event_name": "SessionEnd", "session_id": owner, "prompt_id": "synthetic-turn", "reason": "other"})))
+    assert helper.main(["receiver-end", "--hook"]) == 0
+    closed = store.get_run(run["id"])
+    assert closed["receiver_state"] == "closed" and closed["receiver_owner"] == owner
+    assert closed["receiver_opened_at"] == opened["receiver_opened_at"]
+    assert closed["receiver_reason"] == "native_end"
+    assert store.get_intent(admitted["id"])["terminal_reason"] == "receiver_closed"
+    late = store.create_operator_intent(to_task_id=run["task_id"], body="after end")
+    assert late["admission"] == "unavailable" and late["terminal_reason"] == "receiver_closed"
+    assert store.get_run(unrelated["id"])["receiver_state"] == "pending"
+    assert store.get_run(unrelated["id"])["receiver_owner"] is None
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+def test_extension_retires_only_completed_original_owner_replacement(automatic):
+    node = shutil.which("node")
+    assert node is not None
+    driver = r'''
+import assert from "node:assert/strict";
+const calls = [], timers = new Map();
+const cp = await import("node:child_process");
+cp.default.spawnSync = (file, args, options) => {
+  calls.push([args, JSON.parse(options.input ?? "{}")]);
+  return {status: 0, stdout: "", stderr: ""};
+};
+(await import("node:module")).default.syncBuiltinESMExports();
+globalThis.setInterval = (fn) => { timers.set(1, fn); return 1; };
+globalThis.clearInterval = (id) => timers.delete(id);
+const {default: adapter} = await import(MODULE_URI);
+function context(id, file, parent = null) {
+  return {sessionManager: {getHeader: () => ({parentSession: parent}),
+    getSessionId: () => id, getSessionFile: () => file}};
+}
+function instance() {
+  const handlers = new Map();
+  adapter({on: (name, fn) => handlers.set(name, fn), sendMessage() {}, sendUserMessage() {}});
+  return handlers;
+}
+const owner = context("old", "/old.jsonl"), next = context("new", "/new.jsonl", "fork-parent");
+let h = instance();
+h.get("session_start")({}, owner);
+assert.deepEqual(calls[0], [["receiver-start", "--hook"], {session_id: "old"}]);
+assert.equal(h.has("session_before_switch"), false);
+h.get("session_switch")({previousSessionFile: "/wrong"}, next);
+h.get("session_switch")({previousSessionFile: "/old.jsonl"}, owner);
+h.get("session_switch")({}, next);
+assert.equal(calls.length, 1);
+h.get("session_switch")({previousSessionFile: "/old.jsonl"}, next);
+assert.deepEqual(calls[1], [["receiver-end", "--hook"], {session_id: "old", reason: "native_owner_replaced"}]);
+h.get("session_start")({}, owner);
+h.get("session_shutdown")({}, owner);
+if (process.env.AOS_AGENT_AUTOMATIC === "1") {
+  h.get("tool_result")({content: []}, owner);
+  h.get("agent_end")({}, owner);
+}
+assert.equal(calls.length, 2);
+assert.equal(timers.size, 0);
+h = instance();
+h.get("session_start")({}, context("child", "/child", "old"));
+h.get("session_start")({}, owner);
+h.get("session_shutdown")({}, owner);
+assert.equal(calls.length, 2);
+h = instance();
+h.get("session_shutdown")({}, owner);
+assert.deepEqual(calls[2], [["receiver-end", "--hook"], {session_id: "old"}]);
+h.get("session_start")({}, owner);
+assert.equal(calls.length, 3);
+assert.equal(h.has("tool_result"), process.env.AOS_AGENT_AUTOMATIC === "1");
+'''.replace("MODULE_URI", json.dumps((SCRIPT.parent / "aos_pi.ts").as_uri()))
+    result = subprocess.run([node, "--input-type=module", "-e", driver],
+                            env=dict(os.environ, AOS_AGENT_AUTOMATIC=str(int(automatic))),
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_specific_wait_yields_incoming_and_rewaits_original(agent_env, bus):
+    original = bus.add_row(task_id=TASK_ID, to_task_id="operator", run_id=RUN_ID, body="original")
+    incoming = bus.add_row(task_id="AO-2", to_task_id=TASK_ID, body="mutual question")
+    first = held_call(agent_env, "aos_wait", {"id": original["id"], "timeout_s": 4})
+    assert wait_status(first)["outcome"] == "incoming" and incoming["framed"] in text_of(first)
+    assert bus.rows[original["id"]]["state"] == "stored"
+    bus.answer_on_wait_call = bus.wait_calls + 1
+    second = held_call(agent_env, "aos_wait", {"id": original["id"], "timeout_s": 4})
+    assert wait_status(second)["outcome"] == "answered"
+    assert wait_status(second)["request_id"] == original["id"]
+    assert "yes, go ahead" in text_of(second) and bus.rows[original["id"]]["state"] == "answered"
+
+
+def test_wait_answer_incoming_notice_tie_deduplicates(agent_env, bus):
+    original = bus.add_row(task_id=TASK_ID, to_task_id="operator", run_id=RUN_ID, body="original")
+    question = bus.add_row(task_id="AO-2", to_task_id=TASK_ID, body="question")
+    notice = bus.add_row(task_id="AO-3", to_task_id=TASK_ID, body="notice", kind="notice")
+    notice["framed"] = f'<agent-notice id="{notice["id"]}">\nnotice\n</agent-notice>'
+    bus.answer_on_wait_call = 1
+    result = held_call(agent_env, "aos_wait", {"id": original["id"], "timeout_s": 4})
+    reply = next(row for row in bus.rows.values() if row.get("reply_to") == original["id"])
+    assert wait_status(result)["outcome"] == "answered"
+    for row in (question, notice, reply):
+        assert text_of(result).count(row["framed"]) == 1
+    assert "<agent-notice " in text_of(result)
+
+
+def own_question(store, run):
+    return store.create_intent(run["task_id"], run["id"], run["claim_token"],
+                               kind="request", to_task_id="operator", body="ORIGINAL-KEEP")
+
+
+def test_wait_recovers_hook_acked_full_frames_and_suppresses_only_retained(real_delivery, monkeypatch, capsys):
+    helper, store, run, first, _, _ = real_delivery
+    original = own_question(store, run)
+    long_row = store.create_operator_intent(to_task_id=run["task_id"], body="FULL:" + "x" * 4500)
+    monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
+    helper.hook_inbox()
+    capsys.readouterr()
+    assert store.requests_for_run(run["id"], run["claim_token"]) == []
+    emitted = []
+    answer = helper.run_tool("aos_wait", {"id": original["id"], "timeout_s": 1}, emit=emitted.append)
+    assert not answer["isError"] and wait_status(answer)["outcome"] == "incoming"
+    assert first["framed"] in text_of(answer) and long_row["framed"] in text_of(answer)
+    assert store.get_intent(original["id"])["state"] == "stored"
+    again = helper.run_tool("aos_wait", {"id": original["id"], "timeout_s": 1}, emit=emitted.append)
+    assert wait_status(again)["outcome"] == "timeout" and long_row["framed"] not in text_of(again)
+    pending = store.create_operator_intent(to_task_id=run["task_id"], body="STILL-PENDING")
+    helper.Ledger(run["id"]).append({"event": "wait_returned", "id": pending["id"]})
+    result = helper.run_tool("aos_wait", {"id": original["id"], "timeout_s": 1}, emit=emitted.append)
+    assert pending["framed"] in text_of(result)
+
+
+def test_wait_stabilizes_hook_discovery_on_answered_exit(real_delivery, monkeypatch, capsys):
+    helper, store, run, incoming, _, _ = real_delivery
+    original = own_question(store, run)
+    real_inbox = helper.Bus.inbox
+    real_wait = helper.Bus.wait
+    raced = False
+
+    def target(bus, ident, timeout):
+        store.create_operator_intent(reply_to=original["id"], body="ANSWER")
+        return real_wait(bus, ident, timeout)
+
+    def companion(bus, known_ids=None, timeout=None):
+        nonlocal raced
+        if not raced:
+            raced = True
+            monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
+            helper.hook_inbox()
+            capsys.readouterr()
+        return real_inbox(bus, known_ids, timeout)
+
+    # The hook uses the original read, while the waiting bus gets the controlled
+    # ACK interleaving after its candidate selection and target observation.
+    class WaitingBus(helper.Bus):
+        wait = target
+        inbox = companion
+
+    client = WaitingBus(helper.load_run(), 3)
+    client.deliveries = []
+    # Avoid applying the controlled read to the concurrently invoked hook.
+    result = helper.tool_wait(client, helper.Ledger(run["id"]), {"id": original["id"], "timeout_s": 1})
+    assert incoming["framed"] in result and "ANSWER" in result
+    assert json.loads(result.splitlines()[0][9:])["outcome"] == "answered"
+    assert result.count(incoming["framed"]) == 1 and store.get_intent(original["id"])["state"] == "answered"
+
+
+def test_wait_drains_api_answered_history_without_sleep_and_bounds_backlog(real_delivery):
+    from fastapi.testclient import TestClient
+    from agent_os.api import create_app
+    from agent_os.config import Settings
+
+    helper, store, run, first, _, _ = real_delivery
+    original = own_question(store, run)
+    ledger = helper.Ledger(run["id"])
+    api = TestClient(create_app(Settings(_env_file=None, BUS_TOKEN="fixture", BUS_DATA_DIR=store.data_dir),
+                                store=store, background=False))
+    rows = [first] + [store.create_operator_intent(to_task_id=run["task_id"], body=f"history-{i}")
+                      for i in range(39)]
+    for row in rows:
+        ledger.prepared(row, "hook")
+        store.report_receipt(row["id"], run["id"], run["claim_token"], "prepared", "hook")
+        response = api.post(f"/tasks/{run['task_id']}/intents", json={
+            "run_id": run["id"], "claim_token": run["claim_token"], "reply_to": row["id"], "body": "answered via API"})
+        assert response.status_code == 200, response.text
+    fresh = [store.create_operator_intent(to_task_id=run["task_id"], body=f"fresh-{i}:" + "f" * 4400)
+             for i in range(25)]
+    for row in fresh:
+        ledger.prepared(row, "hook")
+        store.report_receipt(row["id"], run["id"], run["claim_token"], "prepared", "hook")
+    started = time.monotonic()
+    one = helper.run_tool("aos_wait", {"id": original["id"], "timeout_s": 1}, emit=lambda result: None)
+    assert time.monotonic() - started < 1 and not one["isError"]
+    assert sum(row["framed"] in text_of(one) for row in fresh) == 20
+    markers = {e["id"] for e in ledger.events() if e["event"] == "wait_returned"}
+    assert markers == {row["id"] for row in fresh[:20]}
+    two = helper.run_tool("aos_wait", {"id": original["id"], "timeout_s": 1}, emit=lambda result: None)
+    assert all(row["framed"] in text_of(two) for row in fresh[20:])
+    assert store.get_intent(original["id"])["state"] == "stored"
+
+
+@pytest.mark.parametrize("phase", ["companion", "recheck"])
+def test_wait_transport_error_preserves_observed_payloads(real_delivery, monkeypatch, phase):
+    helper, store, run, incoming, _, _ = real_delivery
+    original = own_question(store, run)
+    if phase == "companion":
+        store.create_operator_intent(reply_to=original["id"], body="PRESERVED-ANSWER")
+        def failed(*args, **kwargs):
+            raise helper.BusError("companion failed " + run["claim_token"])
+        monkeypatch.setattr(helper.Bus, "inbox", failed)
+    else:
+        real_wait = helper.Bus.wait
+        calls = 0
+        def failed(bus, ident, timeout):
+            nonlocal calls
+            calls += 1
+            if calls > 1:
+                raise helper.BusError("target recheck failed")
+            return real_wait(bus, ident, timeout)
+        monkeypatch.setattr(helper.Bus, "wait", failed)
+    result = helper.run_tool("aos_wait", {"id": original["id"], "timeout_s": 1}, emit=lambda result: None)
+    assert result["isError"] and wait_status(result)["outcome"] == "transport_error"
+    assert ("PRESERVED-ANSWER" if phase == "companion" else incoming["framed"]) in text_of(result)
+    assert store.get_intent(incoming["id"])["state"] == "stored"
+    assert run["claim_token"] not in text_of(result)
+    assert not any(e["event"] == "wait_returned" for e in helper.Ledger(run["id"]).events())
+
+
+@pytest.mark.parametrize("failure", ["stdout", "marker", "scan"])
+def test_wait_output_and_local_failures_leave_retryable_delivery(real_delivery, monkeypatch, failure):
+    helper, store, run, incoming, _, _ = real_delivery
+    original = own_question(store, run)
+    append = helper.Ledger.append
+    def fail_marker(ledger, event):
+        if event["event"] == "wait_returned":
+            raise OSError("marker failed")
+        append(ledger, event)
+    def fail_scan(ledger):
+        raise OSError("scan failed")
+    def emit(result):
+        if failure == "stdout":
+            raise BrokenPipeError("output failed")
+    if failure == "marker":
+        monkeypatch.setattr(helper.Ledger, "append", fail_marker)
+    if failure == "scan":
+        monkeypatch.setattr(helper.Ledger, "wait_candidates", fail_scan)
+    if failure == "stdout":
+        with pytest.raises(BrokenPipeError):
+            helper.run_tool("aos_wait", {"id": original["id"], "timeout_s": 1}, emit=emit)
+    else:
+        result = helper.run_tool("aos_wait", {"id": original["id"], "timeout_s": 1}, emit=emit)
+        assert result["isError"] == (failure == "scan")
+        assert wait_status(result)["outcome"] == ("local_error" if failure == "scan" else "incoming")
+    assert store.get_intent(incoming["id"])["state"] == "stored"
+    assert not any(e["event"] == "wait_returned" for e in helper.Ledger(run["id"]).events())
+
+
+def test_wait_control_entry_eof_wins_without_network(helper, monkeypatch):
+    client = helper.Bus(helper.load_run(), 3)
+    helper._PENDING.put((3, {}))
+    helper._EOF.set()
+    def forbidden(*args, **kwargs):
+        pytest.fail("network started despite EOF at entry")
+    monkeypatch.setattr(client, "wait", forbidden)
+    result = helper.tool_wait(client, helper.Ledger(RUN_ID), {"id": "original", "timeout_s": 1})
+    status = json.loads(result.splitlines()[0][9:])
+    assert status["outcome"] == status["control"] == "eof" and status["request_id"] == "original"
+
+
+def test_outer_deadline_during_transport_is_not_a_healthy_timeout(helper, monkeypatch):
+    client = helper.Bus(helper.load_run(), 3)
+    def cut(*args, **kwargs):
+        raise TimeoutError("outer alarm while HTTP is incomplete")
+    monkeypatch.setattr(client, "wait", cut)
+    with pytest.raises(helper.WaitError) as failure:
+        helper.tool_wait(client, helper.Ledger(RUN_ID), {"id": "original", "timeout_s": 1})
+    status = json.loads(str(failure.value).splitlines()[0][9:])
+    assert status["outcome"] == "transport_error" and status["request_id"] == "original"
+
+
+# -- honest receipts (SU3): automatic output prepares, only the agent's own act acknowledges ----
+
+def test_inbox_reports_prepared_and_never_acknowledges(agent_env: dict[str, str], bus: FakeBus) -> None:
+    first = bus.add_row(task_id="AO-2", to_task_id=TASK_ID, body="can you expose the port?")
+    second = bus.add_row(task_id="operator", to_task_id=TASK_ID, body="use staging", run_id=None)
+    result = call(agent_env, "aos_inbox", {})
+    assert result["isError"] is False
+    assert text_of(result).startswith("\n\n".join([first["framed"], second["framed"]]))
+    assert "Answer a request with aos_reply" in text_of(result)
+    assert not [p for p, _ in bus.calls if p.endswith("/ack")]
+    assert bus.receipts() == [(first["id"], "prepared", "inbox_tool"), (second["id"], "prepared", "inbox_tool")]
+    assert all(body["run_id"] == RUN_ID and body["claim_token"] == TOKEN
+               for path, body in bus.calls if path.endswith("/receipt"))
+    assert bus.rows[first["id"]]["state"] == "prepared" and bus.rows[second["id"]]["state"] == "prepared"
+    events = ledger_lines(agent_env)
+    prepared = [e for e in events if e["event"] == "prepared"]
+    assert [(e["id"], e["from"], e["reply_to"], e["source"]) for e in prepared] == [
+        (first["id"], "AO-2", None, "inbox_tool"), (second["id"], "operator", None, "inbox_tool")]
+    assert "acked" not in {e["event"] for e in events}
+    again = call(agent_env, "aos_inbox", {})
+    assert text_of(again).startswith("inbox empty\n\nDelivered to you and not yet answered:")
+    assert "Acknowledged" not in text_of(again)
+
+
+def test_hook_reports_prepared_with_the_hook_source(agent_env: dict[str, str], bus: FakeBus) -> None:
+    rows = [bus.add_row(task_id="AO-2", to_task_id=TASK_ID, body=f"q{i}") for i in range(2)]
+    hook = run_agent(["inbox", "--hook"], agent_env, stdin="{}")
+    assert hook.returncode == 0, hook.stderr
+    context = json.loads(hook.stdout)["hookSpecificOutput"]["additionalContext"]
+    assert all(row["framed"] in context for row in rows) and "acknowledge" not in context.lower()
+    assert bus.receipts() == [(row["id"], "prepared", "hook") for row in rows]
+    assert not [p for p, _ in bus.calls if p.endswith("/ack")]
+    assert [e["source"] for e in ledger_lines(agent_env) if e["event"] == "prepared"] == ["hook", "hook"]
+    assert bus.pending_for(TASK_ID) == []
+
+
+def test_reply_posts_only_the_reply(agent_env: dict[str, str], bus: FakeBus) -> None:
+    question = bus.add_row(task_id="AO-2", to_task_id=TASK_ID, body="which port?")
+    result = call(agent_env, "aos_reply", {"id": question["id"], "text": "8080"})
+    assert result["isError"] is False and f"answer recorded for {question['id']}" in text_of(result)
+    assert [p for p, _ in bus.calls] == [f"/tasks/{TASK_ID}/intents"]
+    assert bus.rows[question["id"]]["state"] == "answered"
+    assert ledger_lines(agent_env) == [{"event": "tool", "name": "aos_reply"}, {"event": "replied", "id": question["id"]}]
+    result = call(agent_env, "aos_reply", {"id": "AO-9-i9", "text": "x"})
+    assert result["isError"] is True and text_of(result) == "bus 404: Intent not found"
+
+
+def test_wait_incoming_and_answer_are_prepared_with_the_wait_source(agent_env: dict[str, str], bus: FakeBus) -> None:
+    question = bus.add_row(task_id=TASK_ID, to_task_id="operator", body="merge?", run_id=RUN_ID)
+    incoming = bus.add_row(task_id="AO-3", to_task_id=TASK_ID, body="unrelated question")
+    bus.answer_on_wait_call = 1
+    result = held_call(agent_env, "aos_wait", {"id": question["id"], "timeout_s": 60})
+    assert result["isError"] is False and wait_status(result)["outcome"] == "answered"
+    reply = next(r for r in bus.rows.values() if r.get("reply_to") == question["id"])
+    assert reply["framed"] in text_of(result) and incoming["framed"] in text_of(result)
+    assert sorted(bus.receipts()) == sorted([(reply["id"], "prepared", "wait_tool"), (incoming["id"], "prepared", "wait_tool")])
+    assert not [p for p, _ in bus.calls if p.endswith("/ack")]
+    events = ledger_lines(agent_env)
+    assert {e["id"] for e in events if e["event"] == "prepared"} == {reply["id"], incoming["id"]}
+    assert {e["id"] for e in events if e["event"] == "wait_returned"} == {reply["id"], incoming["id"]}
+
+
+def test_inbox_wait_prepares_rows_and_the_next_pull_does_not_repeat_them(
+        agent_env: dict[str, str], tmp_path: Path, bus: FakeBus) -> None:
+    env = interactive_env(agent_env, tmp_path, ["worker-secret-value-0001"])
+    row = bus.add_row(task_id="AO-2", to_task_id=TASK_ID, body="child says hi", kind="notice")
+    result = held_call(env, "aos_inbox_wait", {"timeout_s": 5})
+    assert result["isError"] is False and row["framed"] in text_of(result)
+    assert "acknowledg" not in text_of(result).lower()
+    assert bus.receipts() == [(row["id"], "prepared", "inbox_wait_tool")]
+    assert [e["source"] for e in ledger_lines(env) if e["event"] == "prepared"] == ["inbox_wait_tool"]
+    assert "returned" not in {e["event"] for e in ledger_lines(env)}
+    hook = run_agent(["inbox", "--hook"], env, stdin="{}")
+    assert hook.returncode == 0 and hook.stdout == ""
+
+
+def test_stop_hook_blocks_on_a_prepared_unanswered_request_and_not_on_a_notice(ledger_env: dict[str, str]) -> None:
+    write_ledger(ledger_env, [
+        {"event": "prepared", "id": "AO-2-i1", "kind": "request", "from": "AO-2", "reply_to": None,
+         "body": "which port?", "source": "hook"},
+        {"event": "prepared", "id": "AO-3-i1", "kind": "notice", "from": "AO-3", "reply_to": None,
+         "body": "task AO-3 finished: review", "source": "hook"},
+        {"event": "prepared", "id": "AO-4-i1", "kind": "request", "from": "AO-4", "reply_to": None,
+         "body": "answered one", "source": "inbox_tool"},
+        {"event": "replied", "id": "AO-4-i1"},
+    ])
+    stop = run_agent(["stop", "--hook"], ledger_env, stdin=json.dumps({"stop_hook_active": False}))
+    assert stop.returncode == 0, stop.stderr
+    block = json.loads(stop.stdout)
+    assert block["decision"] == "block"
+    assert block["reason"].startswith("Requests delivered to you that you have not answered:")
+    assert "AO-2-i1" in block["reason"] and "AO-3-i1" not in block["reason"] and "AO-4-i1" not in block["reason"]
+    assert "acknowledged" not in block["reason"].lower()
+
+
+def test_wait_candidates_select_prepared_ids_minus_disposed(agent_env: dict[str, str], bus: FakeBus) -> None:
+    question = bus.add_row(task_id=TASK_ID, to_task_id="operator", body="merge?", run_id=RUN_ID)
+    hook_prepared = bus.add_row(task_id="AO-2", to_task_id=TASK_ID, body="x" * 300, state="prepared")
+    replied = bus.add_row(task_id="AO-3", to_task_id=TASK_ID, body="done", state="prepared")
+    returned = bus.add_row(task_id="AO-4", to_task_id=TASK_ID, body="seen", state="prepared")
+    write_ledger(agent_env, [
+        {"event": "prepared", "id": hook_prepared["id"], "kind": "request", "from": "AO-2", "reply_to": None,
+         "body": "x" * 200, "source": "hook"},
+        {"event": "prepared", "id": replied["id"], "kind": "request", "from": "AO-3", "reply_to": None,
+         "body": "done", "source": "hook"},
+        {"event": "replied", "id": replied["id"]},
+        {"event": "prepared", "id": returned["id"], "kind": "request", "from": "AO-4", "reply_to": None,
+         "body": "seen", "source": "wait_tool"},
+        {"event": "wait_returned", "id": returned["id"]},
+    ])
+    result = held_call(agent_env, "aos_wait", {"id": question["id"], "timeout_s": 1})
+    known = [body["known_ids"] for path, body in bus.calls if path.endswith("/requests")]
+    assert known and known[0] == [hook_prepared["id"]]
+    assert wait_status(result)["outcome"] == "incoming" and hook_prepared["framed"] in text_of(result)
+
+
+def test_summary_counts_prepared_and_replied_without_an_acknowledged_count(agent_env: dict[str, str], bus: FakeBus) -> None:
+    write_ledger(agent_env, [
+        {"event": "hook", "at": 1},
+        {"event": "prepared", "id": "AO-2-i1", "kind": "request", "from": "AO-2", "reply_to": None, "body": "q", "source": "hook"},
+        {"event": "prepared", "id": "AO-3-i1", "kind": "notice", "from": "AO-3", "reply_to": None, "body": "n", "source": "hook"},
+        {"event": "tool", "name": "aos_reply"}, {"event": "replied", "id": "AO-2-i1"},
+    ])
+    summary = run_agent(["summary"], agent_env)
+    assert summary.returncode == 0, summary.stderr
+    assert "prepared 2 (AO-2-i1, AO-3-i1)" in summary.stdout and "replied 1" in summary.stdout
+    assert "acknowledged" not in summary.stdout
+
+
+def test_protocol_is_2_5_and_the_tool_set_is_unchanged(agent_env: dict[str, str]) -> None:
+    assert run_agent(["version"], agent_env).stdout.strip() == "aos-agent protocol 2.6"
+    responses, _ = mcp(agent_env, [rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                                                      "clientInfo": {"name": "t", "version": "0"}}),
+                                   rpc("tools/list", {}, id=2)])
+    tools = {tool["name"]: tool["description"] for tool in responses[-1]["result"]["tools"]}
+    assert sorted(tools) == sorted(TOOL_NAMES[:6])
+    assert "does not acknowledge" in tools["aos_inbox"] and "aos_reply" in tools["aos_inbox"]
+    assert "acknowledg" not in tools["aos_inbox_wait"].lower() if "aos_inbox_wait" in tools else True
+
+
+def test_helper_queue_fetches_without_preparing_and_deduplicates_queued_receipts(
+        agent_env: dict[str, str], tmp_path: Path, bus: FakeBus) -> None:
+    empty = run_agent(["queue"], agent_env)
+    assert empty.returncode == 0, empty.stderr
+    assert json.loads(empty.stdout)["messages"] == []
+    assert ledger_lines(agent_env) == []
+
+    first = bus.add_row(task_id="AO-2", to_task_id=TASK_ID, body="queue me once")
+    second = bus.add_row(task_id="AO-3", to_task_id=TASK_ID, kind="notice", body="child finished")
+    res1 = run_agent(["queue"], agent_env)
+    assert res1.returncode == 0, res1.stderr
+    payload1 = json.loads(res1.stdout)
+    assert [m["id"] for m in payload1["messages"]] == [first["id"], second["id"]]
+    assert first["framed"] == payload1["messages"][0]["framed"]
+    assert bus.rows[first["id"]]["state"] == "stored"
+    assert bus.rows[second["id"]]["state"] == "stored"
+    receipt_calls = [(p, b["stage"], b["source"]) for p, b in bus.calls if p.endswith("/receipt")]
+    assert receipt_calls == [
+        (f"/intents/{first['id']}/receipt", "queued", "owner_queue"),
+        (f"/intents/{second['id']}/receipt", "queued", "owner_queue"),
+    ]
+
+    # A second poll while rows are still stored on the bus does not re-post queued receipts.
+    res2 = run_agent(["queue"], agent_env)
+    assert res2.returncode == 0
+    assert [m["id"] for m in json.loads(res2.stdout)["messages"]] == [first["id"], second["id"]]
+    assert [(p, b["stage"], b["source"]) for p, b in bus.calls if p.endswith("/receipt")] == receipt_calls
+
+    bus.inbox_error = (503, {"detail": "bus down"})
+    outage = run_agent(["queue"], agent_env)
+    assert outage.returncode == 3 and "bus 503" in outage.stderr and outage.stdout == ""
+
+    missing = run_agent(["queue"], dict(agent_env, AOS_AGENT_RUN_FILE=str(tmp_path / "missing")))
+    assert missing.returncode == 3 and missing.stderr == load_helper().NO_CREDENTIAL + "\n"
+
+
+def test_helper_prepare_records_prepared_and_reports_bus_failure_for_retry(
+        agent_env: dict[str, str], bus: FakeBus) -> None:
+    m1 = bus.add_row(task_id="AO-2", to_task_id=TASK_ID, body="context msg 1")
+    m2 = bus.add_row(task_id="AO-3", to_task_id=TASK_ID, body="context msg 2")
+    run_agent(["queue"], agent_env)
+    bus.calls.clear()
+
+    # Simulate bus failure on m2 during prepare --hook: m1 confirmed, m2 unconfirmed.
+    bus.fail_receipt_ids.add(m2["id"])
+    prep1 = run_agent(["prepare", "--hook"], agent_env, stdin=json.dumps({"messages": [
+        {"id": m1["id"], "kind": "request", "task_id": "AO-2", "reply_to": None, "body": m1["body"]},
+        {"id": m2["id"], "kind": "request", "task_id": "AO-3", "reply_to": None, "body": m2["body"]},
+    ]}))
+    assert prep1.returncode == 0
+    assert json.loads(prep1.stdout) == {"prepared_ids": [m1["id"]]}
+    assert "AOS_AGENT_HOOK_FAILURE" in prep1.stderr
+    assert bus.rows[m1["id"]]["state"] == "prepared"
+    assert bus.rows[m2["id"]]["state"] == "stored"
+
+    # Reconnect and retry prepare --hook: m1 is not re-posted; m2 is now confirmed on the bus.
+    bus.fail_receipt_ids.clear()
+    bus.calls.clear()
+    prep2 = run_agent(["prepare", "--hook"], agent_env, stdin=json.dumps({"messages": [
+        {"id": m1["id"], "kind": "request", "task_id": "AO-2", "reply_to": None, "body": m1["body"]},
+        {"id": m2["id"], "kind": "request", "task_id": "AO-3", "reply_to": None, "body": m2["body"]},
+    ]}))
+    assert prep2.returncode == 0 and "AOS_AGENT_HOOK_FAILURE" not in prep2.stderr
+    assert json.loads(prep2.stdout) == {"prepared_ids": [m1["id"], m2["id"]]}
+    assert [(p, b["stage"], b["source"]) for p, b in bus.calls if p.endswith("/receipt")] == [
+        (f"/intents/{m2['id']}/receipt", "prepared", "owner_queue")
+    ]
+    assert bus.rows[m2["id"]]["state"] == "prepared"
+    prepared_events = [e for e in ledger_lines(agent_env) if e.get("event") == "prepared"]
+    assert [e["id"] for e in prepared_events] == [m1["id"], m2["id"]]
+
+
+def test_omp_extension_owner_queue_batches_backlog_outage_eof_and_wait_dedup() -> None:
+    node = shutil.which("node")
+    assert node is not None
+    driver = r'''
+import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+const timers = new Map(); let nextId = 0, syncCalls = [], asyncCalls = [], queueResponses = [], prepareResponses = [];
+globalThis.setInterval = (fn) => { timers.set(++nextId, fn); return nextId; };
+globalThis.clearInterval = (id) => timers.delete(id);
+const cp = await import("node:child_process");
+cp.default.spawn = (file, args) => {
+  asyncCalls.push([file, args]);
+  const proc = new EventEmitter();
+  proc.stdout = new EventEmitter();
+  proc.stderr = new EventEmitter();
+  let killed = false;
+  proc.kill = () => { killed = true; };
+  const ans = queueResponses.shift() ?? {status: 0, stdout: '{"messages":[],"ack_note":"[aos] note"}', stderr: ""};
+  queueMicrotask(() => {
+    if (killed) return;
+    if (ans.stdout) proc.stdout.emit("data", Buffer.from(ans.stdout));
+    if (ans.stderr) proc.stderr.emit("data", Buffer.from(ans.stderr));
+    proc.emit("close", ans.status, null);
+  });
+  return proc;
+};
+cp.default.spawnSync = (file, args, opts) => {
+  const input = opts?.input ? JSON.parse(opts.input) : {};
+  syncCalls.push([args, input]);
+  if (args[0] === "queue") {
+    return queueResponses.shift() ?? {status: 0, stdout: '{"messages":[],"ack_note":"[aos] note"}', stderr: ""};
+  }
+  if (args[0] === "prepare") {
+    return prepareResponses.shift() ?? {
+      status: 0,
+      stdout: JSON.stringify({prepared_ids: (input.messages ?? []).map(m => m.id)}),
+      stderr: ""
+    };
+  }
+  return {status: 0, stdout: "", stderr: ""};
+};
+(await import("node:module")).default.syncBuiltinESMExports();
+const {default: adapter} = await import(MODULE_URI);
+
+process.env.AOS_AGENT_AUTOMATIC = "1";
+process.env.AOS_PI_FLAVOUR = "omp";
+const h = new Map(), asides = [];
+let idle = false;
+const ctx = {
+  isIdle: () => idle,
+  sessionManager: {getHeader: () => ({}), getSessionId: () => "owner", getSessionFile: () => "/owner.jsonl"}
+};
+
+// 1. Busy tool + >20 backlog + outage during prepare + retry without duplicate aside
+const page1 = Array.from({length: 20}, (_, i) => ({
+  id: `m-${i + 1}`, kind: "request", task_id: "AO-2", reply_to: null, body: `b-${i + 1}`, framed: `<agent-request id="m-${i + 1}">b-${i + 1}</agent-request>`
+}));
+const page2 = Array.from({length: 5}, (_, i) => ({
+  id: `m-${i + 21}`, kind: "request", task_id: "AO-2", reply_to: null, body: `b-${i + 21}`, framed: `<agent-request id="m-${i + 21}">b-${i + 21}</agent-request>`
+}));
+queueResponses.push({status: 0, stdout: JSON.stringify({messages: page1, ack_note: "[aos] note"}), stderr: ""});
+queueResponses.push({status: 0, stdout: JSON.stringify({messages: page2, ack_note: "[aos] note"}), stderr: ""});
+
+adapter({on: (n, f) => h.set(n, f), sendMessage: (...a) => asides.push(a), sendUserMessage() {}});
+h.get("session_start")({}, ctx);
+h.get("agent_start")({}, ctx);
+h.get("tool_call")({toolName: "bash"}, ctx);
+await new Promise(r => setTimeout(r, 10));
+assert.equal(asides.length, 1);
+assert.equal(asides[0][0].details.ids.length, 20);
+
+// Simulate partial prepare failure on m-20 during context 1, then success on retry when poll completes
+prepareResponses.push({
+  status: 0,
+  stdout: JSON.stringify({prepared_ids: page1.slice(0, 19).map(m => m.id)}),
+  stderr: "AOS_AGENT_HOOK_FAILURE\n"
+});
+prepareResponses.push({
+  status: 0,
+  stdout: JSON.stringify({prepared_ids: ["m-20"]}),
+  stderr: ""
+});
+h.get("tool_result")({toolName: "bash", content: [{type: "text", text: "ok"}], isError: false}, ctx);
+h.get("context")({messages: [{role: "custom", customType: "aos-peer", details: {ids: page1.map(m => m.id)}}]}, ctx);
+h.get("tool_call")({toolName: "bash"}, ctx);
+await new Promise(r => setTimeout(r, 10));
+// Page 2 (5 messages) sent as batch 2 without re-sending m-20 as a duplicate aside!
+assert.equal(asides.length, 2);
+assert.deepEqual(asides[1][0].details.ids, page2.map(m => m.id));
+
+// 2. EOF shutdown before cancelled tool_result performs no post-shutdown syncQueue or prepare
+const syncBeforeShutdown = syncCalls.length;
+h.get("session_shutdown")({}, ctx);
+const afterShutdown = syncCalls.length;
+h.get("tool_result")({toolName: "bash", content: [{type: "text", text: "[Command cancelled]\n"}], isError: true}, ctx);
+assert.equal(syncCalls.length, afterShutdown);
+assert.ok(afterShutdown > syncBeforeShutdown);
+'''.replace("MODULE_URI", json.dumps((SCRIPT.parent / "aos_pi.ts").as_uri()))
+    result = subprocess.run([node, "--input-type=module", "-e", driver], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+

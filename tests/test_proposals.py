@@ -30,6 +30,9 @@ def live_run(client: TestClient, task_id: str) -> dict[str, Any]:
     started = client.post(f"/runs/{run['id']}/start", json={
         "claim_token": run["claim_token"], "base_commit": "a" * 40, "branch": f"ao/{task_id}", "worktree": "/x"})
     assert started.status_code == 200, started.text
+    opened = client.post(f"/runs/{run['id']}/receiver", json={
+        "claim_token": run["claim_token"], "action": "receiving", "owner": run["id"], "reason": "native_start"})
+    assert opened.status_code == 200, opened.text
     return run
 
 

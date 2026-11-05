@@ -763,3 +763,59 @@ def test_remove_run(tmp_path: Path) -> None:
     for bad_bus in ("", "..", "A" * 32, "a" * 31, "0" * 32 + "/../" + BUS_B, "../root/" + BUS_B):
         assert remove_run(str(root), bad_bus, "t1-r1") is False
     assert precious.exists() and other_bus.exists() and direct.exists()
+
+
+# == JUnit before and after (verification gates U3) =============================
+
+JUNIT = b"""<?xml version="1.0" encoding="utf-8"?>
+<testsuites><testsuite name="pytest" tests="5">
+  <testcase classname="tests.test_a" name="test_pass" time="0.1"/>
+  <testcase classname="tests.test_a" name="test_fail"><failure message="boom">trace</failure></testcase>
+  <testcase classname="tests.test_a" name="test_error"><error message="setup">trace</error></testcase>
+  <testcase classname="tests.test_a" name="test_skip"><skipped message="later"/></testcase>
+  <testcase classname="tests.test_b" name="test_param[1-2]"><system-out>noise</system-out></testcase>
+</testsuite></testsuites>
+"""
+
+
+def test_parse_junit_reads_each_outcome() -> None:
+    assert evidence.parse_junit(JUNIT) == {
+        "tests.test_a::test_pass": "passed", "tests.test_a::test_fail": "failed",
+        "tests.test_a::test_error": "error", "tests.test_a::test_skip": "skipped",
+        "tests.test_b::test_param[1-2]": "passed",
+    }
+    single = b'<testsuite><testcase name="lonely"/></testsuite>'  # no <testsuites>, no classname
+    assert evidence.parse_junit(single) == {"::lonely": "passed"}
+
+
+@pytest.mark.parametrize("data", [
+    b'<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "aaaa">]><testsuite><testcase name="&a;"/></testsuite>',
+    b'<!doctype html><testsuite/>',
+    b'<testsuite><testcase name="t"></testsuite>',  # does not parse
+    b'\x00\x01 not xml',
+    b'<testsuite>' + b'<testcase name="t"/>' * 10 + b' ' * (5 * 1024 * 1024) + b'</testsuite>',  # over the cap
+], ids=["entity", "doctype", "unclosed", "binary", "oversize"])
+def test_parse_junit_refuses_hostile_or_broken_files(data: bytes) -> None:
+    with pytest.raises(ValueError):
+        evidence.parse_junit(data)
+
+
+def test_a_test_passes_only_where_it_passed_everywhere() -> None:
+    first = evidence.parse_junit(b'<testsuite><testcase classname="c" name="t"/>'
+                                 b'<testcase classname="c" name="t"><skipped/></testcase></testsuite>')
+    assert first == {"c::t": "skipped"}
+    merged = evidence.merge_outcomes([{"c::t": "passed", "c::u": "failed"}, {"c::t": "skipped", "c::u": "passed"}])
+    assert merged == {"c::t": "skipped", "c::u": "failed"}
+
+
+def test_lost_tests_names_what_passed_before_and_not_after() -> None:
+    before = {"a::gone": "passed", "a::skipped": "passed", "a::broke": "passed", "a::errored": "passed",
+              "a::kept": "passed", "a::was_failing": "failed", "a::new_before": "skipped"}
+    after = {"a::skipped": "skipped", "a::broke": "failed", "a::errored": "error", "a::kept": "passed",
+             "a::was_failing": "passed", "a::added": "passed"}
+    assert evidence.lost_tests(before, after, failures=False) == [
+        {"test": "a::gone", "after": "missing"}, {"test": "a::skipped", "after": "skipped"}]
+    assert evidence.lost_tests(before, after, failures=True) == [
+        {"test": "a::broke", "after": "failed"}, {"test": "a::errored", "after": "error"},
+        {"test": "a::gone", "after": "missing"}, {"test": "a::skipped", "after": "skipped"}]
+    assert evidence.lost_tests({}, after, failures=True) == []

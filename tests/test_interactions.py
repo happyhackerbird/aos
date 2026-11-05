@@ -207,10 +207,9 @@ def test_two_tasks_with_diffs_and_a_finding_prompt_and_stored_ok(
                              expected_spec_hash=task["spec_hash"],
                              effective_acceptance=task["acceptance"], acceptance_source="task")
     store.start_run(run_a["id"], run_a["claim_token"], base_commit="a", branch="b", worktree="/xa")
+    store.update_receiver(run_a["id"], run_a["claim_token"], action="receiving", owner="a", reason="native_start")
     store.declare_scope(tid_a, scope_kind="symbol", key="K", operation="replace",
                        run_id=run_a["id"], claim_token=run_a["claim_token"])
-    store.finish_run(run_a["id"], run_a["claim_token"], status="review", report="ok",
-                     result_commit=sha_a)
 
     task_b = store.create_task(repo="repo-a", title="Task B", brief="brief-b-text",
                                acceptance=["true"])
@@ -220,11 +219,35 @@ def test_two_tasks_with_diffs_and_a_finding_prompt_and_stored_ok(
                              expected_spec_hash=task_b["spec_hash"],
                              effective_acceptance=task_b["acceptance"], acceptance_source="task")
     store.start_run(run_b["id"], run_b["claim_token"], base_commit="a", branch="b", worktree="/xb")
+    store.update_receiver(run_b["id"], run_b["claim_token"], action="receiving", owner="b", reason="native_start")
+    # SU3 receipt rows (D12b f): one explicitly acknowledged through the CLI, one prepared by a
+    # hook and answered after its asker closed, one legacy row migrated from the old columns.
+    explicit = store.create_intent(tid_b, run_b["id"], run_b["claim_token"], kind="request",
+                                   to_task_id=tid_a, body="explicit-ack-me")
+    store.ack_intent(explicit["id"], run_a["id"], run_a["claim_token"], source="cli")
+    asked = store.create_intent(tid_a, run_a["id"], run_a["claim_token"], kind="request",
+                                to_task_id=tid_b, body="answer-me-late")
+    store.report_receipt(asked["id"], run_b["id"], run_b["claim_token"], "prepared", "hook")
+    with store.connection() as db:
+        db.execute("INSERT INTO task_intents (id,task_id,run_id,kind,to_task_id,body,reply_to,state,"
+                   "delivered_via,delivered_at,acked_at,answered_at,created_at,delivery_attempts,"
+                   "to_run_id,admission,terminal_at,terminal_reason) VALUES "
+                   "(?,?,?,?,?,?,NULL,'acknowledged','inbox','2026-10-01T00:00:00Z','2026-10-01T00:00:00Z',"
+                   "NULL,'2026-10-01T00:00:00Z',1,?,'legacy',NULL,NULL)",
+                   (f"{tid_b}-i9", tid_b, run_b["id"], "request", tid_a, "legacy-auto-acked", run_a["id"]))
+        store._migrate_receipts(db)
+    store.finish_run(run_a["id"], run_a["claim_token"], status="review", report="ok",
+                     result_commit=sha_a)
+    late_reply = store.create_intent(tid_b, run_b["id"], run_b["claim_token"], kind="request",
+                                     reply_to=asked["id"], body="late answer")
+    assert late_reply["admission"] == "unavailable"
     scope_b = store.declare_scope(tid_b, scope_kind="symbol", key="K", operation="add",
                                   run_id=run_b["id"], claim_token=run_b["claim_token"])
     store.finish_run(run_b["id"], run_b["claim_token"], status="review", report="ok",
                      result_commit=sha_b)
     finding_id = scope_b["findings"][0]["id"]
+    late = store.create_operator_intent(to_task_id=tid_a, body="retained late instruction")
+    assert late["admission"] == "unavailable"
 
     monkeypatch.setenv("AOS_STUB_RESULT_TEXT",
                        json.dumps({"scenarios": [{"title": "T1", "why": "W1", "test_command": "true"}]}))
@@ -238,6 +261,27 @@ def test_two_tasks_with_diffs_and_a_finding_prompt_and_stored_ok(
     assert "b.txt" in prompt
     assert f"scope {scope_b['id']}" in prompt
     assert f"finding {finding_id}" in prompt
+    assert late["id"] in prompt and "admission=unavailable" in prompt
+    assert "terminal_reason=no_live_receiver" in prompt and f"terminal_at={late['terminal_at']}" in prompt
+    # Evidence identity, source and stage reach the material handed to the spawn boundary:
+    # explicit evidence is distinct from automatic and legacy evidence, and an answered original
+    # is not confused with the delivery of its unavailable reply.
+    lines = {line.split(":")[0].split()[-1]: line for line in prompt.splitlines() if line.startswith("intent ")}
+    assert "via=" not in prompt and "acked=" not in prompt and "attempts=" not in prompt
+    explicit_line = lines[explicit["id"]]
+    assert "acknowledged@" in explicit_line and "/agent:cli" in explicit_line and "[legacy]" not in explicit_line
+    assert "prepared=absent" in explicit_line
+    legacy_line = lines[f"{tid_b}-i9"]
+    assert "acknowledged@2026-10-01T00:00:00Z/legacy:automatic [legacy]" in legacy_line
+    assert "prepared@2026-10-01T00:00:00Z/legacy:inbox [legacy]" in legacy_line and "agent:" not in legacy_line
+    asked_line = lines[asked["id"]]
+    assert asked_line.startswith(f"intent {asked['id']}: answered") and "answered@" in asked_line
+    assert "prepared@" in asked_line and "/helper:hook" in asked_line and "undelivered=absent" in asked_line
+    reply_line = lines[late_reply["id"]]
+    assert reply_line.startswith(f"intent {late_reply['id']}: unavailable")
+    assert "undelivered@" in reply_line and "/bus:admission(receiver_closed)" in reply_line
+    assert "answered=absent" in reply_line and f"reply_to={asked['id']}" in reply_line
+    assert "admission=unavailable" in reply_line and f"to_run_id={run_a['id']}" in reply_line
     assert "model-proposed, unverified: do not run a command you have not read" in out
     assert "1. T1: true" in out
 

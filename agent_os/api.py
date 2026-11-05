@@ -101,10 +101,14 @@ class TaskCreate(Body):
     acceptance: list[Annotated[str, Field(min_length=1)]] = Field(default_factory=list)
     constraints: str = ""
     tier: int = Field(default=1, ge=0, le=3)
-    harness: Literal["claude", "codex", "pi"] = "claude"
+    harness: Literal["claude", "codex", "pi", "devin"] = "claude"
     execution: Literal["headless", "interactive"] = "headless"
     host: Literal["mac", "server", "any"] | None = None
     reviews: str | None = None  # lane V: a task of the same repository this one reviews (the store checks it)
+    # Verification gates U2: checks this task needs on record before accept or merge (the store checks the names).
+    required_checks: list[str] = Field(default_factory=list, max_length=20)
+    # U3: run even when the acceptance commands already pass before the agent (a guard for working behaviour).
+    regression_guard: bool = False
 
     @field_validator("repo", "title")
     @classmethod
@@ -122,7 +126,7 @@ class TaskPatch(Body):
     acceptance: list[Annotated[str, Field(min_length=1)]] | None = None
     constraints: str | None = None
     tier: int | None = Field(default=None, ge=0, le=3)
-    harness: Literal["claude", "codex", "pi"] | None = None
+    harness: Literal["claude", "codex", "pi", "devin"] | None = None
     execution: Literal["headless", "interactive"] | None = None
     host: Literal["mac", "server", "any"] | None = None
 
@@ -176,9 +180,18 @@ class ClaimBody(Body):
     workflow_commit: str | None = None
     workflow_ref: str | None = None
     workflow_sha: str | None = None
-    harness: Literal["claude", "codex", "pi"] | None = None
+    harness: Literal["claude", "codex", "pi", "devin"] | None = None
     confirm_tier3: bool = False
     dispatch_key: str | None = Field(default=None, min_length=1)
+    required_checks: list[str] | None = Field(default=None, max_length=20)  # U2: workflow default + task's list
+
+
+class CheckBody(Body):
+    """Verification gates U2: a required check recorded with the operator bearer against the review run's head."""
+    name: str = Field(min_length=1, max_length=40)
+    commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    status: Literal["passed", "waived"] = "passed"
+    note: str = Field(min_length=1, max_length=2000)
 
 
 class PreflightRefusalBody(Body):
@@ -226,7 +239,14 @@ class HeartbeatBody(Body):
     session_owner: Literal["runner", "hand", "happier"] | None = None
     session_pid: StrictInt | None = None
     session_addr: str | None = None
-    session_agent: Literal["claude", "codex", "pi"] | None = None
+    session_agent: Literal["claude", "codex", "pi", "devin"] | None = None
+
+
+class ReceiverBody(Body):
+    claim_token: str
+    action: Literal["receiving", "closing", "closed"]
+    owner: str | None = Field(default=None, min_length=1, max_length=256)
+    reason: str = Field(min_length=1, max_length=200)
 
 
 class StartBody(Body):
@@ -238,7 +258,12 @@ class StartBody(Body):
     session_owner: Literal["runner", "hand", "happier"] | None = None
     session_pid: StrictInt | None = None
     session_addr: str | None = None
-    session_agent: Literal["claude", "codex", "pi"] | None = None
+    session_agent: Literal["claude", "codex", "pi", "devin"] | None = None
+
+
+class LostTest(Body):
+    test: str = Field(min_length=1, max_length=500)
+    after: Literal["missing", "skipped", "failed", "error"]
 
 
 class ResultBody(Body):
@@ -252,6 +277,7 @@ class ResultBody(Body):
     session_id: str | None = None
     remote: str | None = None
     evidence: dict[str, Any] | None = None
+    test_changes: list[LostTest] | None = Field(default=None, max_length=200)  # U3: passed before, not after
 
 
 class ProgressBody(Body):
@@ -337,20 +363,32 @@ class WaitBody(Body):
     timeout: int = Field(default=60, ge=0, le=60)
 
 
-class DeliveredBody(Body):
+class ReceiptBody(Body):
+    # SU3 D4, SU4 D1: what the exact receiving run's helper did with a row -- queued into a harness
+    # queue or prepared into the model's context -- and through which interface. Provider
+    # inclusion (`included`) is accepted from nobody; a helper cannot report it.
     run_id: str = Field(min_length=1)
     claim_token: str
-    via: Literal["socket", "daemon-steer", "daemon-start", "queue", "happier", "inbox"]
+    stage: Literal["queued", "prepared"]
+    source: Literal["inbox_tool", "wait_tool", "inbox_wait_tool", "hook", "owner_queue", "cli"]
     note: str | None = Field(default=None, max_length=500)
 
 
 class AckBody(Body):
+    # SU3 D4/D5a: an acknowledgement names the explicit interface the agent used; a caller
+    # that cannot name one (an automatic path) is refused rather than recorded as explicit.
     run_id: str = Field(min_length=1)
     claim_token: str
+    source: Literal["cli"]
 
 
 class RequestsBody(Body):
     claim_token: str
+
+
+class InboxBody(RequestsBody):
+    known_ids: list[Annotated[StrictStr, Field(min_length=1, max_length=128)]] = Field(
+        default_factory=list, max_length=20)
 
 
 class WriteForm(Body):
@@ -653,10 +691,17 @@ def create_app(settings: Settings | None = None, *, store: Store | None = None,
                                workflow_sha=body.workflow_sha,
                                harness=body.harness, confirm_tier3=body.confirm_tier3,
                                dispatch_key=body.dispatch_key, lease_seconds=settings.TASK_LEASE_SECONDS,
-                               max_live_per_repo=settings.TASK_MAX_LIVE_RUNS_PER_REPO)
+                               max_live_per_repo=settings.TASK_MAX_LIVE_RUNS_PER_REPO,
+                               required_checks=body.required_checks)
         conflicts = [f for f in store.findings_for_task(task_id, open_only=True)
                     if f["severity"] in ("high", "medium")]
         return {**run, "conflicts": conflicts}
+
+    @app.post("/tasks/{task_id}/checks", dependencies=[Depends(auth)])
+    def record_check(task_id: str, body: CheckBody) -> dict[str, Any]:
+        # The operator bearer only: a worker's sandbox holds a run credential, never this token, so no agent can
+        # record a check for its own result (verification gates U2).
+        return store.record_check(task_id, body.name, commit=body.commit, status=body.status, note=body.note)
 
     @app.post("/tasks/{task_id}/integration", dependencies=[Depends(auth)])
     def post_integration(task_id: str, body: IntegrationBody) -> dict[str, Any]:
@@ -702,6 +747,11 @@ def create_app(settings: Settings | None = None, *, store: Store | None = None,
                                    session_owner=body.session_owner, session_pid=body.session_pid,
                                    session_addr=body.session_addr, session_agent=body.session_agent)
 
+    @app.post("/runs/{run_id}/receiver")
+    def update_receiver(run_id: str, body: ReceiverBody) -> dict[str, Any]:
+        return store.update_receiver(run_id, body.claim_token, action=body.action,
+                                     owner=body.owner, reason=body.reason)
+
     # -- request ledger (task_intents) -----------------------------------
 
     @app.post("/tasks/{task_id}/intents")
@@ -738,7 +788,8 @@ def create_app(settings: Settings | None = None, *, store: Store | None = None,
             open_waits[body.run_id] = open_waits.get(body.run_id, 0) + 1
         try:
             while True:
-                if result["intent"]["state"] == "answered" or time.monotonic() >= deadline:
+                if (result["intent"]["state"] in ("answered", "expired", "undeliverable", "unavailable")
+                        or result["intent"].get("terminal_reason") is not None or time.monotonic() >= deadline):
                     return result
                 time.sleep(1)
                 result = store.intent_for_waiter(intent_id, body.run_id, body.claim_token)
@@ -761,14 +812,14 @@ def create_app(settings: Settings | None = None, *, store: Store | None = None,
                                   acceptance=body.acceptance, constraints=body.constraints, reviews=body.reviews,
                                   request_id=body.request_id, base=body.base)
 
-    @app.post("/intents/{intent_id}/delivered")
-    def deliver_intent(intent_id: str, body: DeliveredBody) -> dict[str, Any]:
-        return store.report_delivery(intent_id, body.run_id, body.claim_token, body.via, note=body.note,
-                                     ack_seconds=settings.AOS_REQUEST_ACK_SECONDS)
+    @app.post("/intents/{intent_id}/receipt")
+    def report_receipt(intent_id: str, body: ReceiptBody) -> dict[str, Any]:
+        return store.report_receipt(intent_id, body.run_id, body.claim_token, body.stage, body.source,
+                                    note=body.note, ack_seconds=settings.AOS_REQUEST_ACK_SECONDS)
 
     @app.post("/intents/{intent_id}/ack")
     def ack_intent(intent_id: str, body: AckBody) -> dict[str, Any]:
-        return store.ack_intent(intent_id, body.run_id, body.claim_token,
+        return store.ack_intent(intent_id, body.run_id, body.claim_token, source=body.source,
                                 ack_seconds=settings.AOS_REQUEST_ACK_SECONDS)
 
     @app.post("/runs/{run_id}/candidates")
@@ -806,7 +857,7 @@ def create_app(settings: Settings | None = None, *, store: Store | None = None,
                 raise HTTPException(403, "family read is interactive-only") from exc
             raise
         return store.family(run["task_id"], max_live_per_repo=settings.TASK_MAX_LIVE_RUNS_PER_REPO,
-                            detail=body.task_id)
+                            detail=body.task_id, run_id=run_id)
 
     @app.get("/tasks/{task_id}/family", dependencies=[Depends(auth)])
     def task_family(task_id: str, child: str | None = Query(default=None)) -> dict[str, Any]:
@@ -818,12 +869,13 @@ def create_app(settings: Settings | None = None, *, store: Store | None = None,
                                 children=[c.model_dump() for c in body.children])
 
     @app.post("/runs/{run_id}/requests")
-    def run_requests(run_id: str, body: RequestsBody) -> dict[str, Any]:
+    def run_requests(run_id: str, body: InboxBody) -> dict[str, Any]:
         pending = store.requests_for_run(run_id, body.claim_token,
                                          ack_seconds=settings.AOS_REQUEST_ACK_SECONDS)
         task_id = store.get_run(run_id)["task_id"]
         overlaps = [_overlap_text(o) for o in store.overlaps_for_task(task_id)]
-        return {"pending_requests": pending, "overlaps": overlaps}
+        retained = store.retained_requests_for_run(run_id, body.claim_token, body.known_ids)
+        return {"pending_requests": pending, "overlaps": overlaps, "retained_requests": retained}
 
     @app.get("/tasks/{task_id}/intents", dependencies=[Depends(auth)])
     def list_intents(task_id: str) -> list[dict[str, Any]]:
@@ -892,7 +944,9 @@ def create_app(settings: Settings | None = None, *, store: Store | None = None,
                                session_id=body.session_id, remote=body.remote, marks=marks,
                                grace_seconds=settings.TASK_LATE_RESULT_GRACE_SECONDS,
                                evidence=(json.dumps(body.evidence, separators=(",", ":"))
-                                         if body.evidence is not None else None))
+                                         if body.evidence is not None else None),
+                               test_changes=([entry.model_dump() for entry in body.test_changes]
+                                             if body.test_changes is not None else None))
         code_lane.notify_result(run)
         return run
 

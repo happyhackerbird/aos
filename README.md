@@ -155,7 +155,8 @@ Docker Desktop and other Linux distributions are unqualified.
 
 These features have narrower or historical evidence, not the supported release contract:
 
-- Pi and omp harnesses, including finite interactive omp sessions and `aos attach`.
+- Pi, omp and Claude harnesses, including managed interactive omp and Claude Code sessions with `aos attach`.
+- The Devin harness: headless runs only, with one live OpenShell run on the Mac so far.
 - Agent messaging, Telegram replies, automatic delivery and pull-only controls.
   `AOS_OPENSHELL_COMMS=pull` retains messaging tools but disables automatic delivery;
   `0` disables messaging. Enabled modes require authenticated sandbox-to-bus readiness.

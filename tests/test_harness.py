@@ -45,6 +45,19 @@ def test_parse_harness_output_claude_and_codex_formats() -> None:
     assert harness.parse_harness_output(incomplete, "codex") == (None, "t1")
 
 
+def test_parse_harness_output_devin_is_plain_text() -> None:
+    # Measured on devin 3000.11.92: `-p` wrote exactly b"DONE\n" to stdout, and the CLI has no JSON output flag.
+    assert harness.parse_harness_output(b"DONE\n", "devin") == ("DONE", None)
+    assert harness.parse_harness_output(b"first line\nsecond line\n", "devin") == ("first line\nsecond line", None)
+    assert harness.parse_harness_output(b"", "devin") == (None, None)
+    assert harness.parse_harness_output(b" \n", "devin") == (None, None)
+
+
+def test_parse_harness_output_refuses_a_harness_it_does_not_know() -> None:
+    with pytest.raises(ValueError, match="nosuch"):
+        harness.parse_harness_output(b"{}", "nosuch")
+
+
 def test_parse_harness_output_claude_single_object_is_unchanged() -> None:
     obj = {"type": "result", "result": "done", "session_id": "s"}
     assert harness.parse_harness_output(json.dumps(obj).encode(), "claude") == ("done", "s")
@@ -113,6 +126,7 @@ def _record_killpg(monkeypatch: pytest.MonkeyPatch, error: OSError | None = None
             raise error
 
     monkeypatch.setattr(harness.os, "killpg", fake_killpg)
+    monkeypatch.setattr(harness.psutil, "process_iter", lambda: iter(()))
     return sent
 
 
@@ -166,16 +180,17 @@ def test_kill_group_refuses_unsafe_groups_without_signal_or_wait(
     assert ("own process group" if case.endswith("own-group") else "<= 1") in description
 
 
-def test_kill_group_ends_a_real_child_group(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Smoke against a real, separately spawned child group: the guards leave ordinary cleanup alone."""
+@pytest.mark.parametrize("group_signals_denied", [False, True])
+def test_kill_group_ends_a_real_child_group(
+        monkeypatch: pytest.MonkeyPatch, group_signals_denied: bool) -> None:
     proc = subprocess.Popen(["sleep", "30"], start_new_session=True)
     try:
         pgid = os.getpgid(proc.pid)
         assert pgid == proc.pid and pgid > 1 and pgid != os.getpgrp()
-        try:
-            os.killpg(pgid, 0)  # signal 0 to the child's own new group: a permission probe, nothing is sent
-        except PermissionError:
-            pytest.skip("this sandbox refuses every process-group signal (EPERM on killpg), even to its own child")
+        if group_signals_denied:
+            def denied(group: int, sig: int) -> None:
+                raise PermissionError(1, "process-group signals denied")
+            monkeypatch.setattr(harness.os, "killpg", denied)
         assert harness.kill_group(proc) is None
         assert proc.poll() is not None
     finally:

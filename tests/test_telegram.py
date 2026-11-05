@@ -108,6 +108,8 @@ def operator_question(store: Store) -> dict[str, Any]:
                            expected_spec_hash=task["spec_hash"],
                            effective_acceptance=task["acceptance"], acceptance_source="task")
     store.start_run(run["id"], run["claim_token"], base_commit="a", branch="b", worktree="/x")
+    store.update_receiver(run["id"], run["claim_token"], action="receiving",
+                          owner=run["id"], reason="native_start")
     question = store.create_intent(task["id"], run["id"], run["claim_token"], kind="request",
                                    to_task_id="operator", body="which branch?")
     assert store.mark_intent_notified(question["id"], "operator", chat_id="-200", message_id=55)
@@ -149,7 +151,8 @@ def test_reply_to_the_notice_answers_the_intent_once(settings: Settings, store: 
     answer = [row for row in store.list_intents(question["task_id"]) if row["reply_to"] == question["id"]]
     assert len(answer) == 1 and answer[0]["body"] == "main, please" and answer[0]["task_id"] == "operator"
     assert len(sent) == 1 and sent[0]["chat_id"] == "-200"
-    assert sent[0]["text"] == f"answered {question['id']} ({answer[0]['id']})"
+    assert sent[0]["text"].startswith(f"answered {question['id']} ({answer[0]['id']})")
+    assert "reply admission=accepted" in sent[0]["text"] and answer[0]["to_run_id"] in sent[0]["text"]
     # a second reply to the same notice: the request is already answered; one refusal line, no new row
     sent = run_loop(settings, store, [text_update(2, "actually develop")])
     assert len([row for row in store.list_intents(question["task_id"]) if row["reply_to"] == question["id"]]) == 1

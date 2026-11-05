@@ -1,8 +1,50 @@
 # Release validation
 
-## Gate state
+## Next release candidate evidence (runtime `b5032ab`, 2026-11-05)
 
-Release `v0.1.0` is the exported tree of the release commit that contains this page.
+The next release is the export of the release commit that contains this section; its
+version number and publication remain maintainer decisions. Its runtime is source
+`b5032ab`: main integrated with the peer-delivery work (exact-run receiver admission and
+closure, responsive specific waits, honest receipts, independent OMP owner receive), the
+one-line output limit, and two Devin isolation repairs. The release commit adds export
+rules, guide wording and coordination records only; every `agent_os/` file and the
+harness sources equal `b5032ab`.
+
+| Check | Pin / environment | Actual result |
+|---|---|---|
+| Full source suite | `b5032ab`, isolated procedure, macOS host (Colima) | 2763 passed, 9 skipped (zsh absent 7, omp absent 1, case-sensitive filesystem 1) |
+| Export suite | Export of the release commit, isolated procedure | In the release notes: this page is part of that export |
+| Export scope, links and identifier checks | Export of the release commit | In the release notes; the export's own refusals (root scope, missing local links) were fixed before this page |
+| Linux Claude/Codex matrix | Runtime `b5032ab`, image `aos-harness:rc-b5032ab` (amd64), both fixtures, five scenarios | 20/20 PASS. The first Codex pass failed on an expired worker login (refresh token already used); after a fresh sign-in all ten Codex cells passed |
+| Mac Claude/Codex matrix | Same runtime, image built for arm64, Colima | 20/20 PASS |
+| OpenShell merged acceptance | The candidate's own `aos integrate` on a reviewed aos-example matrix task, Linux, fresh sandbox | `uv sync --frozen` exit 0; `scripts/check.sh` 9 pytest checks and four browser/database checks passed, exit 0 |
+| Experimental Pi / omp matrices | Not run on this candidate | The matrix's Pi worker auth had expired; one live OMP messaging check ran instead (next row) |
+| Live OMP messaging | Linux, two omp 18.12.1 runs together (model `openai-codex/gpt-6-astra`) | Each run asked the other and waited; the questions arrived through the independent owner queue (`queued`, then `prepared` from `owner_queue`), both were answered and both runs reached review |
+| Messaging readiness | Linux, real sandbox | A dead sandbox bus port was refused before the prompt in automatic and pull mode (`messaging readiness bus: authenticated sandbox probe failed`) |
+| Mutual specific waits | Linux, two Claude 2.1.296 runs together | Each run asked the other and waited; each wait released on the other's question, both answered, both reached review |
+| Devin messaging ownership | Linux, Devin 3000.11.92, eight-item live battery | On the first repair (`e47fbb7`): root receiver opened once at SessionStart and closed at SessionEnd; delivery prepared once by the root hook; Stop held once; waits released on incoming work and returned an answer/incoming tie whole; bus outages at both lifecycle edges left no open receiver. On `b5032ab`, whose change is admission only: delivery and Stop hold repeated, and a repository with skill sources ran with messaging off |
+
+**Retry cells and the fixed interrupt.** At the matrix's default 45 s interrupt, Claude
+finished and recorded its fix before SIGTERM in the demo-app and aos-example retry
+cells on Mac and in the aos-example cell on Linux, so the requeued run had nothing to
+add and ended `no commits on top of the previous attempt`. Those cells were rerun with
+a 15 s interrupt: the first run stopped with no result and the second reached review.
+The earlier attempts stay in the per-scenario records.
+
+**Devin with messaging on.** A Devin run with messaging on starts no subagents
+(`subagents_enabled: false`); plugin agents and plugin skills are refused before the
+claim; a repository with `.devin/skills`, `.devin/agents`, `.agents/skills`,
+`.agents/agents` or `.windsurf/skills` runs with messaging off and says so. A skill the
+agent writes during its own run is not covered: the live check showed Devin registers
+it and can start a child that shares the run's session id. That is a limit of this
+release, not a guarantee.
+
+The per-scenario records, image IDs and battery evidence stay with the private release
+evidence.
+
+## v0.1.0 gate state (historical)
+
+Release `v0.1.0` was the exported tree of the release commit that contained this page on 2026-10-24.
 Its `RELEASE-MANIFEST.json` names that commit, the export rules and the transformed
 payload. The runtime qualified below is source `3021bed`, composed on 2026-10-23 from
 the release branch and main `714bd74`. Later commits change documentation, test

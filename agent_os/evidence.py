@@ -592,3 +592,68 @@ def prune_quietly(client: Any, environ: Mapping[str, str], err: IO[str]) -> None
         prune(client, evidence_root(environ), err)
     except Exception as exc:  # noqa: BLE001 -- best effort, never blocks a run
         print(f"evidence prune skipped: {type(exc).__name__}", file=err)
+
+
+# -- test-level before and after (verification gates U3) ------------------------------------------------
+
+# Each acceptance command may write JUnit XML into $AOS_TEST_RESULTS; the runner reads it from the before-run and
+# the acceptance sandbox and compares test by test. The files come from a process that ran the agent's code: they
+# are capped, a DOCTYPE or entity declaration refuses the file, and they catch accidents and lazy shortcuts, not a
+# determined forgery. The verdict stays the exit code of the locked command.
+TEST_RESULTS_DIR = "/sandbox/test-results"
+TEST_RESULT_FILES_MAX = 20
+TEST_RESULT_FILE_MAX = 5 * 1024 * 1024
+TEST_NAME_CUT = 300
+TEST_CHANGES_MAX = 100
+_OUTCOME_RANK = {"passed": 0, "skipped": 1, "failed": 2, "error": 3}
+_DECLARATION = re.compile(rb"<!\s*(doctype|entity)", re.IGNORECASE)
+
+
+def parse_junit(data: bytes) -> dict[str, str]:
+    """One JUnit XML file as {"classname::name": passed | failed | error | skipped}. ValueError for a file this
+    reader refuses: over the size cap, a DOCTYPE or entity declaration, or XML that does not parse."""
+    import xml.etree.ElementTree as ElementTree
+
+    if len(data) > TEST_RESULT_FILE_MAX:
+        raise ValueError(f"over {TEST_RESULT_FILE_MAX} bytes")
+    if _DECLARATION.search(data):
+        raise ValueError("has a DOCTYPE or entity declaration")
+    try:
+        root = ElementTree.fromstring(data)
+    except ElementTree.ParseError as exc:
+        raise ValueError(f"does not parse: {exc}") from None
+    outcomes: dict[str, str] = {}
+    for case in root.iter("testcase"):
+        name = case.get("name") or ""
+        key = _cut(f"{case.get('classname') or ''}::{name}", TEST_NAME_CUT)
+        tags = {child.tag for child in case}
+        outcome = ("error" if "error" in tags else "failed" if "failure" in tags
+                   else "skipped" if "skipped" in tags else "passed")
+        if _OUTCOME_RANK[outcome] >= _OUTCOME_RANK.get(outcomes.get(key, "passed"), 0):
+            outcomes[key] = outcome
+    return outcomes
+
+
+def merge_outcomes(files: list[dict[str, str]]) -> dict[str, str]:
+    """Several files' outcomes as one: a test counts as passing only when it passed everywhere it appears."""
+    merged: dict[str, str] = {}
+    for outcomes in files:
+        for key, outcome in outcomes.items():
+            if _OUTCOME_RANK[outcome] >= _OUTCOME_RANK.get(merged.get(key, "passed"), 0):
+                merged[key] = outcome
+    return merged
+
+
+def lost_tests(before: dict[str, str], after: dict[str, str], *, failures: bool) -> list[dict[str, str]]:
+    """Every test that passed before the agent and is not passing after, as {"test", "after"} with after one of
+    missing, skipped, failed, error; in name order. With `failures` False a test that now fails or errors is left
+    out: its command failed, and that failure is already the run's verdict."""
+    changes = []
+    for key in sorted(before):
+        if before[key] != "passed":
+            continue
+        now = after.get(key, "missing")
+        if now == "passed" or (now in ("failed", "error") and not failures):
+            continue
+        changes.append({"test": key, "after": now})
+    return changes

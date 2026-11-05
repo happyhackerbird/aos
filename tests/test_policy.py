@@ -15,7 +15,6 @@ from agent_os.policy import (
     Default,
     GIT,
     PolicyError,
-    branch_changes_policy,
     bus_host,
     git_output,
     read_policy,
@@ -446,19 +445,18 @@ def test_git_output_strips_aos_token_from_embedded_filter(tmp_path, monkeypatch)
     assert set(marker.read_text().splitlines()) == {"TOKEN=[]"}
 
 
-def test_resolve_tip_and_policy_diffs_are_branch_and_history_based(tmp_path):
+def test_resolve_tip_reads_the_branch_not_a_same_named_tag(tmp_path):
+    # The policy-diff half of this test moved with the lock check (verification gates U1):
+    # test_openshell_runner.py::test_protected_refusal_ignores_replace_grafts_commit_graph_and_shallow.
     repo = _repo(tmp_path)
     base = _git("rev-parse", "HEAD", cwd=repo)
     _git("checkout", "-q", "-b", "ao/T", cwd=repo)
     _commit(repo)
     tip = resolve_tip(str(repo), "ao/T")
-    assert branch_changes_policy(str(repo), base, tip)
     _git("tag", "-f", "ao/T", base, cwd=repo)
     assert resolve_tip(str(repo), "ao/T") == tip
     with pytest.raises(PolicyError):
         resolve_tip(str(repo), "missing")
-    _git("replace", tip, base, cwd=repo)
-    assert branch_changes_policy(str(repo), base, tip)
 
 
 @pytest.mark.parametrize("move", ["forced", "fast_forward"])
@@ -589,45 +587,6 @@ def test_resolve_default_ignores_nonbare_remote_extra_head_refs(tmp_path):
     default = resolve_default(str(source))
 
     assert default.state == "available" and default.sha == main
-
-
-def test_branch_changes_policy_ignores_grafts_commit_graph_and_shallow(tmp_path):
-    repo = _repo(tmp_path)
-    base = _git("rev-parse", "HEAD", cwd=repo)
-    _git("checkout", "-q", "-b", "ao/T", cwd=repo)
-    tip = _commit(repo)
-    grafts = repo / ".git/info/grafts"
-    grafts.parent.mkdir(exist_ok=True)
-    grafts.write_text(tip + "\n")
-    assert branch_changes_policy(str(repo), base, tip)
-    grafts.unlink()
-    _git("commit-graph", "write", "--reachable", cwd=repo)
-    assert branch_changes_policy(str(repo), base, tip)
-    (repo / ".git/shallow").write_text(tip + "\n")
-    assert branch_changes_policy(str(repo), base, tip)
-
-
-def test_branch_changes_policy_sees_earlier_renamed_and_not_other_changes(tmp_path):
-    repo = _repo(tmp_path)
-    base = _commit(repo, "base policy")
-
-    _git("checkout", "-q", "-b", "ao/earlier", cwd=repo)
-    _commit(repo, "policy first", text=VALID + '[network]\nallow = ["example.com"]\n')
-    (repo / "later").write_text("later\n")
-    _git("add", "later", cwd=repo)
-    _git("commit", "-q", "-m", "unrelated second", cwd=repo)
-    assert branch_changes_policy(str(repo), base, _git("rev-parse", "HEAD", cwd=repo))
-
-    _git("checkout", "-q", "-b", "ao/rename", base, cwd=repo)
-    _git("mv", "aos-policy.toml", "renamed-policy.toml", cwd=repo)
-    _git("commit", "-q", "-m", "rename policy", cwd=repo)
-    assert branch_changes_policy(str(repo), base, _git("rev-parse", "HEAD", cwd=repo))
-
-    _git("checkout", "-q", "-b", "ao/other", base, cwd=repo)
-    (repo / "only-other").write_text("other\n")
-    _git("add", "only-other", cwd=repo)
-    _git("commit", "-q", "-m", "other only", cwd=repo)
-    assert not branch_changes_policy(str(repo), base, _git("rev-parse", "HEAD", cwd=repo))
 
 
 def test_git_output_strips_trace_and_literal_pathspec_environment(tmp_path, monkeypatch):

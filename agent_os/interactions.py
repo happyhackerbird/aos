@@ -27,6 +27,7 @@ from typing import IO, Any
 import httpx
 
 from agent_os import gitops, harness, integrate, workflow
+from agent_os.store import format_receipts
 
 CALL_TIMEOUT_SECONDS = 600
 
@@ -128,11 +129,14 @@ def _intent_lines(intent: dict[str, Any]) -> list[str]:
         lines.append(f"assessment {intent.get('id')}: {intent.get('assessment')} about "
                      f"{intent.get('about_intent')}")
     else:
+        # SU3 D10: the evidence render itself comes from agent_os.store.format_receipts (a leaf
+        # module, no cycle), so review material and the CLI cannot disagree on the facts.
         line = (f"intent {intent.get('id')}: {intent.get('state')} {intent.get('task_id')} -> "
                 f"{intent.get('to_task_id')} created={intent.get('created_at')} "
-                f"via={intent.get('delivered_via')} delivered={intent.get('delivered_at')} "
-                f"acked={intent.get('acked_at')} answered={intent.get('answered_at')} "
-                f"attempts={intent.get('delivery_attempts')}")
+                f"receipts=[{format_receipts(intent.get('receipts') or [])}] "
+                f"answered={intent.get('answered_at')} admission={intent.get('admission')} "
+                f"to_run_id={intent.get('to_run_id')} terminal_reason={intent.get('terminal_reason')} "
+                f"terminal_at={intent.get('terminal_at')}")
         if intent.get("reply_to"):
             line += f" reply_to={intent['reply_to']}"
         lines.append(line)

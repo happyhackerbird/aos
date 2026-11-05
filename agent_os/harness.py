@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
+import psutil
 
 from agent_os import policy
 
@@ -75,7 +76,10 @@ def parse_harness_output(raw: bytes, harness: str) -> tuple[str | None, str | No
 
     Claude's json form accepts a single object with any formatting, as before; a stream-json transcript
     supplies its LAST result line. A document or line whose decode raises RecursionError is unparseable.
+    Devin has no JSON output: `devin -p` prints the text of all its turns as plain text, and no session id.
     """
+    if harness == "devin":
+        return raw.decode(errors="replace").strip() or None, None
     if harness == "claude":
         try:
             parsed = json.loads(raw.decode(errors="replace"))
@@ -95,6 +99,8 @@ def parse_harness_output(raw: bytes, harness: str) -> tuple[str | None, str | No
                 return None, None
             result = parsed.get("result")
             session = parsed.get("session_id")
+    elif harness != "codex":
+        raise ValueError(f"no output format for harness {harness!r}")
     else:
         result = session = None
         completed = False
@@ -149,12 +155,36 @@ def kill_group(proc: subprocess.Popen) -> str | None:
     if pgid == os.getpgrp():
         return f"process group {pgid} cleanup refused: it is the caller's own process group"
     failures: list[str] = []
+    individual_fallback = False
 
     def signal_group(sig: int) -> None:
+        nonlocal individual_fallback
         try:
             os.killpg(pgid, sig)
         except ProcessLookupError:
             pass
+        except PermissionError as exc:
+            # OpenShell can deny group signals while allowing individual PIDs.
+            # psutil retains process identities, so a reused PID is not signalled.
+            members = []
+            for member in psutil.process_iter():
+                try:
+                    if member.pid > 1 and member.pid != os.getpid() and os.getpgid(member.pid) == pgid:
+                        members.append(member)
+                except (OSError, psutil.NoSuchProcess):
+                    pass
+            if members:
+                individual_fallback = True
+            elif not individual_fallback:
+                failures.append(f"{type(exc).__name__}: {exc}")
+            for member in reversed(members):
+                try:
+                    if os.getpgid(member.pid) == pgid:
+                        member.send_signal(sig)
+                except (ProcessLookupError, psutil.NoSuchProcess):
+                    pass
+                except (OSError, psutil.AccessDenied) as failure:
+                    failures.append(f"{type(failure).__name__}: {failure}")
         except OSError as exc:
             failures.append(f"{type(exc).__name__}: {exc}")
 
