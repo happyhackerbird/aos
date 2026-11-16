@@ -1,23 +1,34 @@
 # Agent OS
 
-Hand a coding task to Claude Code or Codex and walk away. Agent OS (AOS) runs the
+Agent OS (AOS) is for delegating coding work to agents instead of managing their
+sessions one by one. Hand a task to Claude Code or Codex and walk away: AOS runs the
 agent unattended inside a sandbox that reaches only what your repository's committed
 policy allows, reruns your acceptance checks itself in a second sandbox with no
 credentials, and brings the result back as a branch with the evidence attached. You
 read evidence instead of repeating the work. Nothing merges until you say so.
 
 AOS is early software for one developer with one self-hosted, single-process bus.
-This is release `v0.1.0`. The [validation record](docs/release-validation.md)
-lists the checks run on this release and their qualifications, separately from
-historical proof.
+The [validation record](docs/release-validation.md) lists the checks run on each
+release and their qualifications, separately from historical proof.
 
 ## Why
 
-A coding agent saying "done" is one event. Its changes passing your checks is a
-second. You accepting the result is a third. Most setups collapse all three into the
-agent's own report. AOS keeps them apart and records each one, so for every result you
-can answer: which task ran, where its changes live, which checks actually ran, and
-what you accepted.
+I started AOS because I was using Claude Code, Codex and Oh My Pi (omp) and wanted to
+run them from one place, on my own server, in sandboxes. As I used more agents, I kept
+becoming the connection between them: moving context, checking progress, passing
+questions around and deciding what should happen next. AOS gives each task a record
+outside any conversation: its brief, its runs, the branch holding its changes and the
+checks that ran against them.
+
+Building that pushed me into a harder question: what should the system require before
+it treats an agent's work as successful? A convincing summary isn't enough. Tests can
+miss the requirement. A reviewer can overlook the same mistake as the builder. Two
+changes can pass separately and fail together.
+
+So AOS keeps three events apart: the agent finishing, the checks passing and you
+accepting the result. Most setups collapse all three into the agent's own report. AOS
+records each one, so for every result you can answer: which task ran, where its changes
+live, which checks actually ran, and what you accepted.
 
 This is what review looks like. The lines below are copied from a run on the public
 example repository (2026-10-13); today's `aos review` prints a few more, such as
@@ -54,7 +65,10 @@ result acceptance/20261013T061139Z/result.txt:
 ## How a task runs
 
 1. You queue a task: a brief and the commands that prove it done. A repository can
-   also commit default checks in `aos-workflow.toml`.
+   also commit default checks in `aos-workflow.toml` and lock paths there, such as its
+   acceptance tests and check scripts. A result that adds, changes or deletes a locked
+   path fails before acceptance runs; `aos-policy.toml` and `aos-workflow.toml` are
+   always locked ([locked paths](docs/reference/configuration.md#locked-paths-and-the-change-report)).
 2. Mark it ready. `aos run` resolves the repository's committed policy and workflow
    before claiming; missing or invalid prerequisites refuse the run. A repository
    without a policy is refused before any work starts.
@@ -76,6 +90,35 @@ result acceptance/20261013T061139Z/result.txt:
 timeouts and interrupted runners retain recorded results and cleanup state;
 `reconcile` retries cleanup of owned OpenShell resources. Read the validation
 qualifications rather than assuming every termination path has clean live proof.
+
+## Coordinating work across agents
+
+A task is the unit. On top of tasks I run one coordinator: an agent session that I give
+an outcome. It splits the work into AOS tasks for different agents, often from
+different providers, and brings me one recommendation with the evidence behind it. I
+build my own projects this way, including AOS itself. The method:
+
+1. If the design is open, an assessment or design task settles it first.
+2. One worker writes the acceptance tests and another attacks them, running
+   deliberately wrong implementations to see whether the suite catches them. The
+   coordinator commits the proof to the default branch and lists it as `protected`,
+   so no later run can change it.
+3. An implementation worker builds against that proof.
+4. `aos integrate` checks the candidate merged onto the current base branch. A fresh
+   reviewer, usually on a different harness than the builder, checks the candidate
+   against the requirements (`aos add --reviews AO-<build>`).
+5. A defect goes back to where it was made: an implementation defect to the builder, a
+   design or proof defect to the brief.
+
+AOS enforces its own parts: the sandbox, the locks, the rerun, the merge check and the
+separate accept step. The order of stages is the coordinator's method, not a pipeline
+built into `aos dispatch`, and a small change can skip the design step or reuse proof
+that has already been attacked.
+
+The coordinator is not part of this release. It runs as an ordinary agent session with
+my own credentials, so leaving acceptance to me is its rule, not a boundary AOS can
+enforce against it, and it stops when its session closes. Moving it into a sandbox and
+keeping it alive across sessions is open work.
 
 ## Try it
 
@@ -156,7 +199,7 @@ Docker Desktop and other Linux distributions are unqualified.
 These features have narrower or historical evidence, not the supported release contract:
 
 - Pi, omp and Claude harnesses, including managed interactive omp and Claude Code sessions with `aos attach`.
-- The Devin harness: headless runs only, with one live OpenShell run on the Mac so far.
+- The Devin harness: headless runs only, exercised live on the Mac and Linux OpenShell gateways ([release validation](docs/release-validation.md)).
 - Agent messaging, Telegram replies, automatic delivery and pull-only controls.
   `AOS_OPENSHELL_COMMS=pull` retains messaging tools but disables automatic delivery;
   `0` disables messaging. Enabled modes require authenticated sandbox-to-bus readiness.
