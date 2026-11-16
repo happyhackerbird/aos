@@ -110,6 +110,34 @@ build my own projects this way, including AOS itself. The method:
 5. A defect goes back to where it was made: an implementation defect to the builder, a
    design or proof defect to the brief.
 
+The same method as a flowchart:
+
+```mermaid
+flowchart TD
+    A[Coordinator prepares brief] --> B{Design settled?}
+    B -->|No| C[Assessment / design / prototype]
+    C --> D[Implementation-ready requirements]
+    B -->|Yes| D
+    D --> E[Independent acceptance-test author]
+    E --> F[Another worker attacks the tests]
+    F --> G{Proof sufficient?}
+    G -->|No| E
+    G -->|Yes| H[Coordinator promotes proof to main]
+    H --> I[Implementation worker]
+    I --> J[Coordinator inspects changes and runs merge check]
+    J --> K{Independent review method}
+    K -->|Ordinary| O[One fresh reviewer]
+    K -->|Review panel| P[Multiple model reviewers inside one AOS task]
+    O --> Q[Coordinator inspects review evidence]
+    P --> R[Synthesize panel findings into one verdict]
+    R --> Q
+    Q --> L{Result}
+    L -->|Implementation defect| I
+    L -->|Design or proof defect| A
+    L -->|Ready| M[Coordinator recommends accept]
+    M --> N[Operator approves acceptance and merge]
+```
+
 AOS enforces its own parts: the sandbox, the locks, the rerun, the merge check and the
 separate accept step. The order of stages is the coordinator's method, not a pipeline
 built into `aos dispatch`, and a small change can skip the design step or reuse proof
