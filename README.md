@@ -96,57 +96,11 @@ qualifications rather than assuming every termination path has clean live proof.
 A task is the unit. On top of tasks I run one coordinator: an agent session that I give
 an outcome. It splits the work into AOS tasks for different agents, often from
 different providers, and brings me one recommendation with the evidence behind it. I
-build my own projects this way, including AOS itself. The method:
+build my own projects this way, including AOS itself.
 
-1. If the design is open, an assessment or design task settles it first.
-2. One worker writes the acceptance tests and another attacks them, running
-   deliberately wrong implementations to see whether the suite catches them. The
-   coordinator commits the proof to the default branch and lists it as `protected`,
-   so no later run can change it.
-3. An implementation worker builds against that proof.
-4. `aos integrate` checks the candidate merged onto the current base branch. A fresh
-   reviewer, usually on a different harness than the builder, checks the candidate
-   against the requirements (`aos add --reviews AO-<build>`).
-5. A defect goes back to where it was made: an implementation defect to the builder, a
-   design or proof defect to the brief.
-
-The same method as a flowchart:
-
-```mermaid
-flowchart TD
-    A[Coordinator prepares brief] --> B{Design settled?}
-    B -->|No| C[Assessment / design / prototype]
-    C --> D[Implementation-ready requirements]
-    B -->|Yes| D
-    D --> E[Independent acceptance-test author]
-    E --> F[Another worker attacks the tests]
-    F --> G{Proof sufficient?}
-    G -->|No| E
-    G -->|Yes| H[Coordinator promotes proof to main]
-    H --> I[Implementation worker]
-    I --> J[Coordinator inspects changes and runs merge check]
-    J --> K{Independent review method}
-    K -->|Ordinary| O[One fresh reviewer]
-    K -->|Review panel| P[Multiple model reviewers inside one AOS task]
-    O --> Q[Coordinator inspects review evidence]
-    P --> R[Synthesize panel findings into one verdict]
-    R --> Q
-    Q --> L{Result}
-    L -->|Implementation defect| I
-    L -->|Design or proof defect| A
-    L -->|Ready| M[Coordinator recommends accept]
-    M --> N[Operator approves acceptance and merge]
-```
-
-AOS enforces its own parts: the sandbox, the locks, the rerun, the merge check and the
-separate accept step. The order of stages is the coordinator's method, not a pipeline
-built into `aos dispatch`, and a small change can skip the design step or reuse proof
-that has already been attacked.
-
-The coordinator is not part of this release. It runs as an ordinary agent session with
-my own credentials, so leaving acceptance to me is its rule, not a boundary AOS can
-enforce against it, and it stops when its session closes. Moving it into a sandbox and
-keeping it alive across sessions is open work.
+The coordinator is not part of this release. What this release enforces is the per-task
+machinery above: the sandbox, the locks, the rerun, the merge check and the separate
+accept step.
 
 ## Try it
 
